@@ -26,7 +26,7 @@ test("retries transient API and public-page failures with bounded concurrency", 
   assert.match(page, /settleInBatches\(queries, 2/);
   assert.match(safeWeb, /WEB_RETRY_DELAYS_MS/);
   assert.match(safeWeb, /RETRYABLE_WEB_STATUS/);
-  assert.match(webRoute, /mapWithConcurrency\(searches, 2/);
+  assert.match(webRoute, /mapSettledWithConcurrency\(searches, 2/);
   assert.match(webRoute, /discovered\.slice\(0, MAX_READS\),\s*4,/s);
 });
 

@@ -439,6 +439,11 @@ nonstandard ports, or bypasses CAPTCHA/bot protection.
 - Listing APIs automatically retry transient network/status failures and bound
   query/page concurrency so a Wi-Fi or interface change is less likely to lose
   the full scan.
+- Marketplace searches use settled-result aggregation rather than fail-fast
+  `Promise.all`. Every selected marketplace, query variation, ZenMarket provider,
+  AI search, rendered browser request, and hydration task is allowed to finish.
+  Failed sources receive their own error status while successful listings and
+  previously loaded pagination results remain visible.
 
 ## Production deployment to Cloudflare
 

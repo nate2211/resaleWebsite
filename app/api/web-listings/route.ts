@@ -381,10 +381,12 @@ async function renderedSearch(query: string) {
     `https://html.duckduckgo.com/html/?q=${encoded}`,
   ];
   const settled = await Promise.allSettled(urls.map(async (url) => {
-    const [html, links] = await Promise.all([
+    const [htmlAttempt, linksAttempt] = await Promise.allSettled([
       renderedHtml(url),
       renderedLinks(url),
     ]);
+    const html = htmlAttempt.status === "fulfilled" ? htmlAttempt.value : "";
+    const links = linksAttempt.status === "fulfilled" ? linksAttempt.value : [];
     const htmlHits = searchHtmlHits(html, url);
     const linkHits = links
       .map((candidate) => unwrapSearchUrl(candidate, url))
@@ -402,11 +404,14 @@ async function renderedSearch(query: string) {
 async function directSecondhandSearch(query: string) {
   const settled = await Promise.allSettled(AI_SECONDHAND_SOURCES.map(async (source) => {
     const searchUrl = source.search(query);
-    const [staticHtml, browserHtml, browserLinks] = await Promise.all([
+    const [staticAttempt, browserAttempt, linksAttempt] = await Promise.allSettled([
       fetchSearchText(searchUrl, "text/html"),
       renderedHtml(searchUrl),
       renderedLinks(searchUrl),
     ]);
+    const staticHtml = staticAttempt.status === "fulfilled" ? staticAttempt.value : "";
+    const browserHtml = browserAttempt.status === "fulfilled" ? browserAttempt.value : "";
+    const browserLinks = linksAttempt.status === "fulfilled" ? linksAttempt.value : [];
     const candidates = [
       ...searchHtmlHits(staticHtml, searchUrl),
       ...searchHtmlHits(browserHtml, searchUrl),
@@ -435,11 +440,16 @@ async function searchPublicWeb(query: string) {
     `site:mercari.com/us/item ${query}`,
     `site:facebook.com/marketplace/item ${query}`,
   ];
-  const [directSecondhand, staticHits, targetedGroups] = await Promise.all([
+  const [directAttempt, staticAttempt, targetedAttempt] = await Promise.allSettled([
     directSecondhandSearch(query),
     staticSearch(discoveryQuery),
-    Promise.all(targetedQueries.map((targeted) => staticSearch(targeted))),
+    Promise.allSettled(targetedQueries.map((targeted) => staticSearch(targeted))),
   ]);
+  const directSecondhand = directAttempt.status === "fulfilled" ? directAttempt.value : [];
+  const staticHits = staticAttempt.status === "fulfilled" ? staticAttempt.value : [];
+  const targetedGroups = targetedAttempt.status === "fulfilled"
+    ? targetedAttempt.value.flatMap((attempt) => attempt.status === "fulfilled" ? [attempt.value] : [])
+    : [];
   const combinedStatic = [...staticHits, ...targetedGroups.flat()];
   const browserHits = combinedStatic.length >= 14 ? [] : await renderedSearch(discoveryQuery);
   // Direct secondhand links are first so eBay, Mercari US, and public Facebook
@@ -705,21 +715,22 @@ function diversifyListings(listings: Partial<Listing>[], maximum = 24) {
   return output;
 }
 
-async function mapWithConcurrency<T, R>(
+async function mapSettledWithConcurrency<T, R>(
   values: readonly T[],
   concurrency: number,
   worker: (value: T, index: number) => Promise<R>,
 ) {
-  const output = new Array<R>(values.length);
+  const output = new Array<PromiseSettledResult<R>>(values.length);
   let cursor = 0;
   const runners = Array.from({ length: Math.min(Math.max(1, concurrency), values.length) }, async () => {
     while (cursor < values.length) {
       const index = cursor;
       cursor += 1;
-      output[index] = await worker(values[index], index);
+      const [attempt] = await Promise.allSettled([worker(values[index], index)]);
+      output[index] = attempt;
     }
   });
-  await Promise.all(runners);
+  await Promise.allSettled(runners);
   return output;
 }
 
@@ -742,10 +753,12 @@ export async function POST(request: Request) {
       `"${query}" resale listing`,
     ].map((value) => value.replace(/\s+/g, " ").trim()))].slice(0, 5);
 
-    const groups = await mapWithConcurrency(searches, 2, async (search) => {
-      try { return await searchPublicWeb(search); }
-      catch { return [] as SearchHit[]; }
-    });
+    const groupAttempts = await mapSettledWithConcurrency(searches, 2, (search) =>
+      searchPublicWeb(search),
+    );
+    const groups = groupAttempts.flatMap((attempt) =>
+      attempt.status === "fulfilled" ? [attempt.value] : [],
+    );
     const discovered = [...new Map(groups
       .flatMap((entry) => entry)
       .map((item) => [item.url, item])).values()]
@@ -759,10 +772,13 @@ export async function POST(request: Request) {
       })
       .slice(0, MAX_RESULTS);
 
-    const reads = await mapWithConcurrency(
+    const readAttempts = await mapSettledWithConcurrency(
       discovered.slice(0, MAX_READS),
       4,
       (item) => readHit(item, query),
+    );
+    const reads = readAttempts.flatMap((attempt) =>
+      attempt.status === "fulfilled" ? [attempt.value] : [],
     );
     const unique = [...new Map(reads.flat()
       .filter((item) => item.url && item.price && !supportedMarketplaceUrl(String(item.url)))

@@ -2095,9 +2095,16 @@ async function hydrate(marketplace: Marketplace, item: DiscoveredItem) {
 }
 
 async function concurrent<T, R>(values: T[], limit: number, task: (value: T) => Promise<R>) {
-  const output = new Array<R>(values.length); let cursor = 0;
-  async function worker() { while (cursor < values.length) { const index = cursor++; output[index] = await task(values[index]); } }
-  await Promise.all(Array.from({ length: Math.min(limit, values.length) }, worker));
+  const output = new Array<R | undefined>(values.length);
+  let cursor = 0;
+  async function worker() {
+    while (cursor < values.length) {
+      const index = cursor++;
+      const [attempt] = await Promise.allSettled([task(values[index])]);
+      output[index] = attempt.status === "fulfilled" ? attempt.value : undefined;
+    }
+  }
+  await Promise.allSettled(Array.from({ length: Math.min(limit, values.length) }, worker));
   return output;
 }
 
@@ -2158,11 +2165,27 @@ export async function GET(request: Request) {
     const grailedIndexPromise = marketplace === "Grailed"
       ? grailedIndexCards(query, page, mode)
       : Promise.resolve([] as Card[]);
-    const [discovery, soldFeedCards, grailedIndex] = await Promise.all([
+    const [discoveryAttempt, soldFeedAttempt, grailedIndexAttempt] = await Promise.allSettled([
       discover(marketplace, query, page, mode),
       soldFeedPromise,
       grailedIndexPromise,
     ]);
+    const discovery = discoveryAttempt.status === "fulfilled"
+      ? discoveryAttempt.value
+      : {
+          items: [] as DiscoveredItem[],
+          directUrls: sourceSearchCandidates(marketplace, query, mode, page),
+          successfulBatches: 0,
+          failedBatches: 1,
+          mercariApiItems: 0,
+          indexedSearchBatches: 0,
+          browserRenderedBatches: 0,
+          browserRenderedUrls: [] as string[],
+          browserBindingAvailable: Boolean(await browserRunBinding()),
+          hasMoreHint: false,
+        };
+    const soldFeedCards = soldFeedAttempt.status === "fulfilled" ? soldFeedAttempt.value : [];
+    const grailedIndex = grailedIndexAttempt.status === "fulfilled" ? grailedIndexAttempt.value : [];
     const discovered = discovery.items;
     const hydrated = await concurrent(discovered, 6, (item) => hydrate(marketplace, item));
     // Prefer sold-feed cards, then Grailed's public index, because both retain

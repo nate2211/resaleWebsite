@@ -17,3 +17,12 @@ test("deep inspection uses the same guarded JSON reader", () => {
   assert.match(page, /"Grailed sold inspection"/);
   assert.match(page, /`\$\{marketplace\} \$\{mode\} inspection`/);
 });
+
+
+test("marketplace orchestration waits for every promise and preserves partial results", () => {
+  assert.match(page, /Promise\.allSettled\(requestMarkets\.map\(async \(marketplace\)/);
+  assert.match(page, /attempt\.status === "fulfilled"/);
+  assert.match(page, /marketplaceAttempt, aiAttempt.*Promise\.allSettled/s);
+  assert.match(page, /status: "error" as const/);
+  assert.match(page, /Kept \$\{listings\.length\} loaded listing/);
+});

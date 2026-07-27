@@ -1986,29 +1986,31 @@ function ListingInspector({
     setGrailedInspectionState("loading");
     const queries = soldQueryVariations(listing.title, listing.brand);
 
-    Promise.all(queries.map(async (query) => {
-      const batches = await Promise.all([0, 1].map(async (page) => {
+    Promise.allSettled(queries.map(async (query) => {
+      const pageAttempts = await Promise.allSettled([0, 1].map(async (page) => {
         const params = new URLSearchParams({
           marketplace: "Grailed", mode: "sold", q: query,
           category: "All", page: String(page),
         });
-        try {
-          const value = await fetchApiJson<{ listings?: Partial<Listing>[] }>(
-            `/api/listings?${params}`,
-            undefined,
-            "Grailed sold inspection",
-          );
-          return Array.isArray(value.listings) ? value.listings : [];
-        } catch {
-          return [];
-        }
+        const value = await fetchApiJson<{ listings?: Partial<Listing>[] }>(
+          `/api/listings?${params}`,
+          undefined,
+          "Grailed sold inspection",
+        );
+        return Array.isArray(value.listings) ? value.listings : [];
       }));
+      const batches = pageAttempts.flatMap((attempt) =>
+        attempt.status === "fulfilled" ? [attempt.value] : [],
+      );
       const listings = [...new Map(batches.flat()
         .filter((item) => item.url && Number(item.price) > 0)
         .map((item) => [String(item.url), item])).values()];
       return { query: `Grailed: ${query}`, listings };
     }))
-      .then((results) => {
+      .then((attempts) => {
+        const results = attempts.flatMap((attempt) =>
+          attempt.status === "fulfilled" ? [attempt.value] : [],
+        );
         if (!active) return;
         setGrailedAttempts(results.map((result) => ({
           query: result.query, count: result.listings.length,
@@ -2080,11 +2082,14 @@ function ListingInspector({
       }
     };
 
-    const activePromise = Promise.all(INTERNATIONAL_MARKETPLACES.map(async (marketplace) => {
+    const activePromise = Promise.allSettled(INTERNATIONAL_MARKETPLACES.map(async (marketplace) => {
       const queries = queryVariations.slice(0, marketplace === "Mercari Japan" ? 2 : 1);
-      const batches = await Promise.all(queries.map((query) =>
+      const queryAttempts = await Promise.allSettled(queries.map((query) =>
         fetchBatch(marketplace, "active", query, 0),
       ));
+      const batches = queryAttempts.flatMap((attempt) =>
+        attempt.status === "fulfilled" ? [attempt.value] : [],
+      );
       const unique = [...new Map(batches.flat()
         .filter((item) => item.url && Number(item.price) > 0)
         .map((item) => [String(item.url), item])).values()];
@@ -2118,19 +2123,28 @@ function ListingInspector({
       };
     }));
 
-    const mercariSoldPromise = Promise.all(queryVariations.slice(0, 4).map(async (query) => {
-      const batches = await Promise.all([0, 1].map((page) =>
+    const mercariSoldPromise = Promise.allSettled(queryVariations.slice(0, 4).map(async (query) => {
+      const pageAttempts = await Promise.allSettled([0, 1].map((page) =>
         fetchBatch("Mercari Japan", "sold", query, page),
       ));
+      const batches = pageAttempts.flatMap((attempt) =>
+        attempt.status === "fulfilled" ? [attempt.value] : [],
+      );
       const listings = [...new Map(batches.flat()
         .filter((item) => item.url && Number(item.price) > 0)
         .map((item) => [String(item.url), item])).values()];
       return { query: `Mercari Japan sold: ${query}`, listings };
     }));
 
-    Promise.all([activePromise, mercariSoldPromise])
-      .then(([activeResults, soldResults]) => {
+    Promise.allSettled([activePromise, mercariSoldPromise])
+      .then(([activeAttempt, soldAttempt]) => {
         if (!active || generation !== internationalGeneration.current) return;
+        const activeResults = activeAttempt.status === "fulfilled"
+          ? activeAttempt.value.flatMap((attempt) => attempt.status === "fulfilled" ? [attempt.value] : [])
+          : [];
+        const soldResults = soldAttempt.status === "fulfilled"
+          ? soldAttempt.value.flatMap((attempt) => attempt.status === "fulfilled" ? [attempt.value] : [])
+          : [];
         const comparableMap = Object.fromEntries(activeResults.map((result) => [
           result.marketplace,
           result.matches,
@@ -3227,7 +3241,7 @@ function BrowseView({
     })));
 
     try {
-      const selectedResponsesPromise = Promise.all(requestMarkets.map(async (marketplace) => {
+      const selectedResponsesPromise = Promise.allSettled(requestMarkets.map(async (marketplace) => {
         const literalQuery = query.trim() || (category === "All clothing" ? "clothing" : category);
         const queries = [...new Set(
           [literalQuery, ...aiSearchQueries]
@@ -3303,6 +3317,17 @@ function BrowseView({
           listings: mergedListings,
           hasMore: values.some((entry) => Boolean(entry.hasMore)),
         };
+      })).then((attempts) => attempts.map((attempt, index) => {
+        if (attempt.status === "fulfilled") return attempt.value;
+        const marketplace = requestMarkets[index];
+        return {
+          marketplace,
+          status: "error" as const,
+          message: requestErrorMessage(attempt.reason, `${marketplace} marketplace request failed.`),
+          sourceUrl: MARKETPLACE_INFO[marketplace].search(query || category),
+          listings: [] as Partial<Listing>[],
+          hasMore: false,
+        };
       }));
 
       const aiSearchPromise = includeAiSearch
@@ -3315,11 +3340,32 @@ function BrowseView({
           }))
         : Promise.resolve(null);
 
-      const [selectedResponses, aiSearchResult] = await Promise.all([
+      const [marketplaceAttempt, aiAttempt] = await Promise.allSettled([
         selectedResponsesPromise,
         aiSearchPromise,
       ]);
       if (generation !== requestGeneration.current || controller.signal.aborted) return;
+      const selectedResponses = marketplaceAttempt.status === "fulfilled"
+        ? marketplaceAttempt.value
+        : requestMarkets.map((marketplace) => ({
+            marketplace,
+            status: "error" as const,
+            message: requestErrorMessage(marketplaceAttempt.reason, `${marketplace} marketplace request failed.`),
+            sourceUrl: MARKETPLACE_INFO[marketplace].search(query || category),
+            listings: [] as Partial<Listing>[],
+            hasMore: false,
+          }));
+      const aiSearchResult = aiAttempt.status === "fulfilled"
+        ? aiAttempt.value
+        : includeAiSearch
+          ? {
+              listings: [] as Listing[],
+              searches: [] as string[],
+              searchTerm: query.trim(),
+              message: requestErrorMessage(aiAttempt.reason, "AI Search failed."),
+              error: true as const,
+            }
+          : null;
 
       const responseByMarketplace = new Map(
         selectedResponses.map((entry) => [entry.marketplace, entry]),
@@ -4812,8 +4858,7 @@ Finish with NOTE: one short explanation. Do not return anything else.`,
         const params = new URLSearchParams({
           marketplace, q: query.slice(0, 100), category: "All", page: String(page), mode,
         });
-        const response = await fetch(`/api/listings?${params}`);
-        const value = await response.json() as {
+        const value = await fetchApiJson<{
           listings?: Partial<Listing>[]; sourceUrl?: string; message?: string;
           diagnostics?: {
             grailedPageCards?: number;
@@ -4821,7 +4866,7 @@ Finish with NOTE: one short explanation. Do not return anything else.`,
             discoveredUrls?: number;
             hydratedCards?: number;
           };
-        };
+        }>(`/api/listings?${params}`, undefined, `${marketplace} assistant ${mode} search`);
         return {
           listings: (value.listings ?? []).map((item) => apiListing(item, marketplace, query)),
           sourceUrl: value.sourceUrl || MARKETPLACE_INFO[marketplace].search(query),
@@ -4837,15 +4882,22 @@ Finish with NOTE: one short explanation. Do not return anything else.`,
         role: "tool",
         content: `Local model query plan · ${aiQueryVariants.map((value) => `“${value}”`).join(", ")}.`,
       }]);
-      const sourceRequests = await Promise.all(
+      const sourceAttempts = await Promise.allSettled(
         aiQueryVariants.map((query) => marketRequest(intent.source, query)),
+      );
+      const sourceRequests = sourceAttempts.flatMap((attempt) =>
+        attempt.status === "fulfilled" ? [attempt.value] : [],
       );
       const interleavedSource = Array.from(
         { length: Math.max(0, ...sourceRequests.map((result) => result.listings.length)) },
         (_, index) => sourceRequests.map((result) => result.listings[index]).filter(Boolean),
       ).flat();
       const sourceResult = {
-        ...sourceRequests[0],
+        ...(sourceRequests[0] ?? {
+          sourceUrl: MARKETPLACE_INFO[intent.source].search(intent.query),
+          message: "All source marketplace requests failed.",
+          diagnostics: undefined,
+        }),
         listings: [...new Map(interleavedSource
           .map((item) => [item.url, item])).values()],
       };
@@ -4863,14 +4915,24 @@ Finish with NOTE: one short explanation. Do not return anything else.`,
       updateStep("web", { status: "running", detail: `Searching current public context for “${intent.query}”…` });
       updateStep("favorites", { status: "complete", detail: `Loaded ${favorites.length} saved favorites for preference context.` });
 
-      const [targetResult, research] = await Promise.all([
+      const [targetAttempt, researchAttempt] = await Promise.allSettled([
         marketRequest(intent.target, intent.query),
-        fetch(`/api/research?q=${encodeURIComponent(`${intent.query} resale market`)}`)
-          .then((response) => response.json()) as Promise<{
-            sources?: { title: string; snippet: string; url: string }[];
-            marketplaceSearches?: { marketplace: string; url: string }[];
-          }>,
+        fetchApiJson<{
+          sources?: { title: string; snippet: string; url: string }[];
+          marketplaceSearches?: { marketplace: string; url: string }[];
+        }>(`/api/research?q=${encodeURIComponent(`${intent.query} resale market`)}`, undefined, "Assistant web research"),
       ]);
+      const targetResult = targetAttempt.status === "fulfilled"
+        ? targetAttempt.value
+        : {
+            listings: [] as Listing[],
+            sourceUrl: MARKETPLACE_INFO[intent.target].search(intent.query),
+            message: requestErrorMessage(targetAttempt.reason, `${intent.target} comparison request failed.`),
+            diagnostics: undefined,
+          };
+      const research = researchAttempt.status === "fulfilled"
+        ? researchAttempt.value
+        : { sources: [], marketplaceSearches: [] };
 
       const webQueries = intent.webQueries.length
         ? intent.webQueries
@@ -4934,11 +4996,14 @@ Finish with NOTE: one short explanation. Do not return anything else.`,
           status: "running",
           detail: `Broad search found ${targetResult.listings.length}; refining by candidate titles with Grailed shop queries…`,
         });
-        await Promise.all(sourceCandidates.slice(0, 6).map(async (listing) => {
+        await Promise.allSettled(sourceCandidates.slice(0, 6).map(async (listing) => {
           const variations = soldQueryVariations(listing.title, listing.brand).slice(0, 2);
-          const results = await Promise.all(variations.map((query) =>
+          const resultAttempts = await Promise.allSettled(variations.map((query) =>
             marketRequest("Grailed", query, "active"),
           ));
+          const results = resultAttempts.flatMap((attempt) =>
+            attempt.status === "fulfilled" ? [attempt.value] : [],
+          );
           const unique = [...new Map([
             ...targetResult.listings,
             ...results.flatMap((result) => result.listings),
@@ -4970,26 +5035,25 @@ Finish with NOTE: one short explanation. Do not return anything else.`,
         const soldQueriesUsed: string[] = [];
         let soldPublicSearchCount = 0;
         let soldPageCardCount = 0;
-        await Promise.all(sourceCandidates.slice(0, 6).map(async (listing) => {
-          try {
-            const variations = soldQueryVariations(listing.title, listing.brand).slice(0, 4);
-            soldQueriesUsed.push(...variations);
-            const results = await Promise.all(variations.flatMap((query) => [
-              marketRequest("Grailed", query, "sold"),
-              marketRequest("Mercari Japan", query, "sold"),
-            ]));
-            soldPublicSearchCount += results.reduce(
-              (sum, result) => sum + (result.diagnostics?.grailedPublicSearch ?? 0), 0,
-            );
-            soldPageCardCount += results.reduce(
-              (sum, result) => sum + (result.diagnostics?.grailedPageCards ?? 0), 0,
-            );
-            const unique = [...new Map(results.flatMap((result) => result.listings)
-              .map((item) => [item.url, item])).values()];
-            soldByCandidate.set(listing.id, unique);
-          } catch {
-            soldByCandidate.set(listing.id, []);
-          }
+        await Promise.allSettled(sourceCandidates.slice(0, 6).map(async (listing) => {
+          const variations = soldQueryVariations(listing.title, listing.brand).slice(0, 4);
+          soldQueriesUsed.push(...variations);
+          const resultAttempts = await Promise.allSettled(variations.flatMap((query) => [
+            marketRequest("Grailed", query, "sold"),
+            marketRequest("Mercari Japan", query, "sold"),
+          ]));
+          const results = resultAttempts.flatMap((attempt) =>
+            attempt.status === "fulfilled" ? [attempt.value] : [],
+          );
+          soldPublicSearchCount += results.reduce(
+            (sum, result) => sum + (result.diagnostics?.grailedPublicSearch ?? 0), 0,
+          );
+          soldPageCardCount += results.reduce(
+            (sum, result) => sum + (result.diagnostics?.grailedPageCards ?? 0), 0,
+          );
+          const unique = [...new Map(results.flatMap((result) => result.listings)
+            .map((item) => [item.url, item])).values()];
+          soldByCandidate.set(listing.id, unique);
         }));
         const soldCount = [...soldByCandidate.values()].reduce((sum, rows) => sum + rows.length, 0);
         updateStep("sold", {

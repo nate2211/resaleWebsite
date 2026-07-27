@@ -175,7 +175,8 @@ test("AI Search keeps Rakuten and the literal query in the combined parallel sca
   assert.match(page, /\(forceRakuten \|\| includeAiSearch\)/);
   assert.match(page, /requestedSelections\.add\("Rakuten"\)/);
   assert.match(page, /\[literalQuery, \.\.\.aiSearchQueries\]/);
-  assert.match(page, /Promise\.all\(requestMarkets\.map\(async \(marketplace\)/);
+  assert.match(page, /Promise\.allSettled\(requestMarkets\.map\(async \(marketplace\)/);
+  assert.match(page, /Promise\.allSettled\(\[\s*selectedResponsesPromise,\s*aiSearchPromise,/s);
   assert.match(page, /zenMarketSelections/);
   assert.match(page, /providerBatchSize/);
   assert.match(page, /providerBatchIndex/);

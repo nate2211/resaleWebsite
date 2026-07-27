@@ -7,7 +7,7 @@ Passed in this packaging environment:
 - TypeScript/TSX syntax transpilation for all 32 application and route files; structural checks for the React client, deterministic analysis,
   local-model intelligence, safe public-web reader, engagement/authenticity
   research, favorites persistence, and listing-monitor API
-- 44 source/regression tests: 43 passed and one rendered-preview test skipped because no production artifact is bundled. Coverage includes executable AI Browser Run discovery, paired Rakuten JSON-LD image/title/price/URL extraction, Depop, Mercari Japan, ZenMarket-card parsing, marketplace selection, indexed-search redirect, sold-listing, article-filter, and append-pagination fixtures
+- 45 source/regression tests: 44 passed and one rendered-preview test skipped because no production artifact is bundled. Coverage includes executable AI Browser Run discovery, paired Rakuten JSON-LD image/title/price/URL extraction, Depop, Mercari Japan, ZenMarket-card parsing, marketplace selection, indexed-search redirect, sold-listing, article-filter, and append-pagination fixtures
 - empty-workspace checks confirming that demo listings, synthetic comparable
   prices, and generated resale projections are not preloaded
 - listing-monitor checks for active, sold, removed, and unknown states, with
@@ -15,6 +15,7 @@ Passed in this packaging environment:
 - default UI-state checks confirming Engagement and Authenticity are expanded
   while International Markets and International Analysis remain closed
 - guarded JSON-response handling, per-query failure isolation, state-safe append pagination, and non-throwing real-listing / Deep Inspection request paths
+- Marketplace query orchestration now uses `Promise.allSettled` at every production fan-out boundary: per-query variations, per-market batches, the combined AI/built-in scan, international comparison scans, ZenMarket proxy requests, public-search providers, rendered/static discovery, and product hydration. A rejected source is converted into an isolated marketplace error result while fulfilled markets and previously loaded pagination results are preserved.
 - article-specific search and result filters for T-shirts, sweatshirts, hoodies, knitwear, outerwear, bottoms, shoes, bags, and accessories
 - The supplied current Depop search source was executed against the production parser and returned 21 unique canonical product cards; the first discounted listing retained its $34 sale price, size, image, and boosted state
 - Goofish has been removed from the selectable marketplace arrays, international cards, research aliases, and FAQ source list. A dedicated AI Search card now occupies its former sixth grid position with an Include toggle, query field, status, and Run AI Search action. Legacy Goofish parser types remain internal only so older saved records do not crash.
