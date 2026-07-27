@@ -1,0 +1,8 @@
+<svg width="640" height="640" viewBox="0 0 640 640" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="640" height="640" fill="#EEF2F7"/>
+  <rect x="110" y="90" width="420" height="460" rx="32" fill="#F8FAFC" stroke="#CBD5E1" stroke-width="4"/>
+  <path d="M260 220C260 186.863 286.863 160 320 160C353.137 160 380 186.863 380 220" stroke="#64748B" stroke-width="18" stroke-linecap="round"/>
+  <path d="M214 246L270 220H370L426 246L462 344L398 369L390 500H250L242 369L178 344L214 246Z" fill="#E2E8F0" stroke="#64748B" stroke-width="8" stroke-linejoin="round"/>
+  <path d="M270 220C282 255 358 255 370 220" stroke="#64748B" stroke-width="8" stroke-linecap="round"/>
+  <text x="320" y="585" text-anchor="middle" fill="#475569" font-family="Arial, sans-serif" font-size="24" font-weight="700">Listing image unavailable</text>
+</svg>

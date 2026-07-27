@@ -1,0 +1,72 @@
+{
+  "version": 2,
+  "purpose": "Offline ResaleMasterLab query, category, risk, and authentication research reference",
+  "marketplaces": ["Depop", "Grailed", "Poshmark"],
+  "categories": [
+    "T-shirts", "Hoodies", "Sweatshirts", "Jackets", "Coats", "Denim",
+    "Pants", "Shorts", "Sneakers", "Boots", "Bags", "Hats", "Accessories",
+    "Vintage", "Streetwear", "Designer", "Workwear", "Technical outerwear"
+  ],
+  "brands": [
+    {"name":"Supreme","queries":["box logo tee","box logo hoodie","motion logo","TNF collaboration"],"risk":"high-counterfeit"},
+    {"name":"Stussy","queries":["8 ball fleece","world tour tee","stock logo hoodie"],"risk":"medium-counterfeit"},
+    {"name":"BAPE","queries":["shark hoodie","college tee","Bapesta"],"risk":"high-counterfeit"},
+    {"name":"Arc'teryx","queries":["Beta LT","Alpha SV","Atom LT","Gamma MX"],"risk":"high-counterfeit"},
+    {"name":"Carhartt","queries":["Detroit jacket","double knee pants","active jacket"],"risk":"condition-sensitive"},
+    {"name":"Carhartt WIP","queries":["Michigan coat","Detroit jacket","Aviation pant"],"risk":"medium-counterfeit"},
+    {"name":"Stone Island","queries":["shadow project","nylon metal","compass sweatshirt"],"risk":"high-counterfeit"},
+    {"name":"Palace","queries":["Tri-Ferg tee","P-logo hoodie","Gore-Tex jacket"],"risk":"medium-counterfeit"},
+    {"name":"Kith","queries":["box logo tee","Williams hoodie","collaboration"],"risk":"medium-counterfeit"},
+    {"name":"Aimé Leon Dore","queries":["logo hoodie","New Balance","uniform"],"risk":"medium-counterfeit"},
+    {"name":"Fear of God","queries":["Essentials hoodie","mainline denim","sweatpants"],"risk":"high-counterfeit"},
+    {"name":"Nike","queries":["SB Dunk Low","ACG fleece","vintage center swoosh"],"risk":"high-counterfeit"},
+    {"name":"Jordan","queries":["Jordan 1","Jordan 4","vintage flight jacket"],"risk":"high-counterfeit"},
+    {"name":"Adidas","queries":["Samba","vintage track jacket","Yeezy"],"risk":"high-counterfeit"},
+    {"name":"New Balance","queries":["990v3","2002R","Aimé Leon Dore"],"risk":"medium-counterfeit"},
+    {"name":"Salomon","queries":["XT-6","ACS Pro","Speedcross"],"risk":"medium-counterfeit"},
+    {"name":"ASICS","queries":["Gel-Kayano 14","Gel-NYC","Kiko collaboration"],"risk":"medium-counterfeit"},
+    {"name":"Polo Ralph Lauren","queries":["Polo Bear sweater","vintage spellout","Polo Sport"],"risk":"medium-counterfeit"},
+    {"name":"Tommy Hilfiger","queries":["vintage sailing jacket","spellout crewneck","denim"],"risk":"low-counterfeit"},
+    {"name":"The North Face","queries":["Nuptse 700","Steep Tech","Denali fleece"],"risk":"high-counterfeit"},
+    {"name":"Patagonia","queries":["Retro-X fleece","Synchilla","vintage Snap-T"],"risk":"medium-counterfeit"},
+    {"name":"Levi's","queries":["501 made in USA","Type II jacket","SilverTab"],"risk":"dating-sensitive"},
+    {"name":"Dickies","queries":["874 pants","Eisenhower jacket","double knee"],"risk":"condition-sensitive"},
+    {"name":"Kapital","queries":["smiley denim","bone knit","Century denim"],"risk":"high-counterfeit"},
+    {"name":"Comme des Garçons","queries":["Play cardigan","Homme Plus","shirt"],"risk":"high-counterfeit"},
+    {"name":"Issey Miyake","queries":["Homme Plissé pants","Pleats Please","vintage bomber"],"risk":"high-counterfeit"},
+    {"name":"Maison Margiela","queries":["Replica sneakers","GAT","four stitch wallet"],"risk":"high-counterfeit"},
+    {"name":"Rick Owens","queries":["Ramones","Geobasket","Detroit denim"],"risk":"high-counterfeit"},
+    {"name":"Chrome Hearts","queries":["trucker hat","zip hoodie","jewelry"],"risk":"very-high-counterfeit"},
+    {"name":"Gallery Dept.","queries":["painted flare","logo tee","French hoodie"],"risk":"high-counterfeit"},
+    {"name":"Denim Tears","queries":["cotton wreath jeans","hoodie","Levi's collaboration"],"risk":"high-counterfeit"},
+    {"name":"Corteiz","queries":["Alcatraz tee","cargo pants","Nike Air Max"],"risk":"high-counterfeit"},
+    {"name":"Brain Dead","queries":["graphic tee","Clarks collaboration","equipment jacket"],"risk":"medium-counterfeit"},
+    {"name":"Online Ceramics","queries":["graphic tee","A24 collaboration","hoodie"],"risk":"medium-counterfeit"},
+    {"name":"Harley-Davidson","queries":["vintage 3D Emblem tee","racing jacket","leather jacket"],"risk":"dating-sensitive"},
+    {"name":"NASCAR","queries":["90s all over print tee","racing jacket","Dale Earnhardt"],"risk":"dating-sensitive"},
+    {"name":"Band tees","queries":["single stitch","tour tee","licensed vintage"],"risk":"very-high-counterfeit"},
+    {"name":"Oakley","queries":["software jacket","archive sunglasses","technical pants"],"risk":"high-counterfeit"},
+    {"name":"Prada","queries":["nylon shoulder bag","sport jacket","America's Cup"],"risk":"high-counterfeit"},
+    {"name":"Gucci","queries":["vintage horsebit","logo hoodie","GG bag"],"risk":"very-high-counterfeit"}
+  ],
+  "conditionChecklist": [
+    "Compare tagged size with measurements",
+    "Check stains, holes, repairs, odors, pilling, fading, heel drag, and sole separation",
+    "Verify zipper, snap, drawcord, cuff, lining, and pocket function",
+    "Confirm whether accessories, box, dust bag, tags, and receipts are included",
+    "Price cleaning, restoration, missing parts, and return risk into the reserve"
+  ],
+  "authenticationChecklist": [
+    "Compare neck, wash, care, size, and country-of-origin labels with the release period",
+    "Check typography, spacing, stitching, embroidery density, hardware, and material",
+    "Request detailed photos when identifying evidence is missing",
+    "Review seller age, completed sales, ratings, consistency, and other inventory",
+    "Treat automated scoring as research evidence, never an authenticity determination"
+  ],
+  "analysisFields": [
+    "source ask", "inbound shipping", "tax", "cleaning", "repair",
+    "expected sale", "marketplace fee", "processing fee", "outbound shipping",
+    "promotion cost", "risk reserve", "net profit", "ROI", "margin",
+    "comparable count", "similarity", "confidence"
+  ]
+}
