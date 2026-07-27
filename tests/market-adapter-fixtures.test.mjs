@@ -62,6 +62,153 @@ test("parses Depop, Mercari Japan, and Goofish cards and builds a Superbuy proxy
     assert.equal(goofish[0].publicPrice, 988);
     assert.equal(goofish[0].publicCurrency, "CNY");
 
+    const goofishStructured = adapter.goofishStructuredItems(`
+      <script type="application/json">{
+        "items":[{
+          "itemId":"1060593587999",
+          "itemTitle":"Supreme Box Logo Tee",
+          "price":688,
+          "currency":"CNY",
+          "image":"https://gw.alicdn.com/imgextra/i1/fixture.webp"
+        }]
+      }</script>
+    `, "https://www.goofish.com/search?q=supreme");
+    assert.equal(goofishStructured.length, 1);
+    assert.equal(goofishStructured[0].url, "https://www.goofish.com/item?id=1060593587999");
+    assert.equal(goofishStructured[0].publicPrice, 688);
+    assert.equal(goofishStructured[0].publicCurrency, "CNY");
+    assert.match(goofishStructured[0].image ?? "", /alicdn/);
+
+    const superbuyAssignment = adapter.goofishStructuredItems(`
+      <script>
+        window.__INITIAL_STATE__ = {
+          "searchResult":{"list":[{
+            "platformCode":"xianyu",
+            "goodsNo":"1060593588001",
+            "goodsTitle":"Raf Simons Superbuy Assignment Jacket",
+            "priceInfo":{"amount":799,"currency":"CNY"},
+            "goodsImage":{"url":"https://gw.alicdn.com/superbuy-assignment.webp"}
+          }]}
+        };
+      </script>
+    `, "https://www.superbuy.com/en/page/fleamarket/?nTag=Home-search&from=search-input&keyword=raf+simons");
+    assert.equal(superbuyAssignment.length, 1);
+    assert.equal(superbuyAssignment[0].url, "https://www.goofish.com/item?id=1060593588001");
+    assert.equal(superbuyAssignment[0].publicPrice, 799);
+    assert.equal(superbuyAssignment[0].publicCurrency, "CNY");
+    assert.match(superbuyAssignment[0].image ?? "", /superbuy-assignment/);
+
+    const superbuyFlight = adapter.goofishStructuredItems(`
+      <script>self.__next_f.push([1,"{\\"items\\":[{\\"goodsId\\":\\"1060593588002\\",\\"goodsName\\":\\"Supreme React Flight Tee\\",\\"goodsPrice\\":588,\\"currency\\":\\"CNY\\"}]}"])</script>
+    `, "https://www.superbuy.com/en/page/fleamarket/?nTag=Home-search&from=search-input&keyword=supreme");
+    assert.equal(superbuyFlight.length, 1);
+    assert.equal(superbuyFlight[0].url, "https://www.goofish.com/item?id=1060593588002");
+    assert.equal(superbuyFlight[0].publicPrice, 588);
+
+    const superbuyMixedCase = adapter.goofishStructuredItems(`
+      <script type="application/json">{
+        "Results":[{
+          "PlatformCode":"xianyu",
+          "ItemID":"1060593588003",
+          "GoodsTitle":"Raf Simons Mixed Case Coat",
+          "GoodsPrice":"699",
+          "CurrencyCode":"CNY",
+          "ImageURL":"https://gw.alicdn.com/mixed-case.webp"
+        }]
+      }</script>
+    `, "https://www.superbuy.com/en/page/fleamarket/?nTag=Home-search&from=search-input&keyword=raf+simons");
+    assert.equal(superbuyMixedCase.length, 1);
+    assert.equal(superbuyMixedCase[0].url, "https://www.goofish.com/item?id=1060593588003");
+    assert.equal(superbuyMixedCase[0].publicPrice, 699);
+    assert.equal(superbuyMixedCase[0].publicCurrency, "CNY");
+    assert.match(superbuyMixedCase[0].image ?? "", /mixed-case/);
+
+    const unrelatedSuperbuyCatalog = adapter.goofishStructuredItems(`
+      <div data-item-id="998877665544"><h3>Ordinary Taobao item</h3><span>CN¥ 99</span></div>
+    `, "https://www.superbuy.com/en/page/search/?nTag=Home-search&from=search-input&keyword=shirt");
+    assert.equal(unrelatedSuperbuyCatalog.length, 0, "ordinary Superbuy catalog IDs must not be mislabeled as Goofish");
+
+    const rakuten = adapter.rakutenSearchItems(`
+      <ul><li class="searchresultitem">
+        <a href="https://item.rakuten.co.jp/archive-shop/raf-001/" title="Raf Simons Archive Sweater">
+          <img data-original="https://thumbnail.image.rakuten.co.jp/fixture.jpg" alt="Raf Simons Archive Sweater">
+        </a>
+        <p class="condition">中古</p><div class="price">12,800円</div>
+      </li></ul>
+    `, "https://search.rakuten.co.jp/search/mall/raf%20simons/?p=1");
+    assert.equal(rakuten.length, 1);
+    assert.equal(rakuten[0].url, "https://item.rakuten.co.jp/archive-shop/raf-001/");
+    assert.equal(rakuten[0].publicPrice, 12800);
+    assert.equal(rakuten[0].publicCurrency, "JPY");
+    assert.match(rakuten[0].title, /Raf Simons Archive Sweater/);
+    assert.match(rakuten[0].image ?? "", /thumbnail\.image\.rakuten\.co\.jp/);
+
+    const rakutenJsonLd = adapter.rakutenJsonLdItems(`
+      <script type="application/ld+json">{
+        "@context":"https://schema.org",
+        "@type":"ItemList",
+        "itemListElement":[
+          {"@type":"ListItem","position":1,"item":{
+            "@type":"Product",
+            "name":"Raf Simons JSON-LD Sweater",
+            "image":["https://thumbnail.image.rakuten.co.jp/@0_mall/archive-shop/cabinet/raf-002.jpg"],
+            "offers":{"@type":"Offer","price":24800,"priceCurrency":"JPY"},
+            "url":"https://item.rakuten.co.jp/archive-shop/raf-002/"
+          }}
+        ]
+      }</script>
+    `, "https://search.rakuten.co.jp/search/mall/raf%20simons/?p=1");
+    assert.equal(rakutenJsonLd.length, 1);
+    assert.equal(rakutenJsonLd[0].url, "https://item.rakuten.co.jp/archive-shop/raf-002/");
+    assert.equal(rakutenJsonLd[0].publicPrice, 24800);
+    assert.equal(rakutenJsonLd[0].publicCurrency, "JPY");
+    assert.match(rakutenJsonLd[0].image ?? "", /archive-shop\/cabinet\/raf-002\.jpg/);
+
+    const inlineRakutenJsonLd = adapter.rakutenJsonLdItems(`
+      <div data-comp-id-flat="searchResults">
+        {"@context":"https://schema.org/","@type":"ItemList","itemListElement":[
+          {"@type":"ListItem","position":1,"item":{"@type":"Product",
+            "name":"Inline Raf Simons Coat",
+            "image":["https://thumbnail.image.rakuten.co.jp/@0_mall/coat-shop/cabinet/coat-1.jpg"],
+            "offers":{"@type":"Offer","price":99000,"priceCurrency":"JPY"},
+            "url":"https://item.rakuten.co.jp/coat-shop/coat-1/"}}
+        ]}
+      </div>
+    `, "https://search.rakuten.co.jp/search/mall/raf%20simons/?p=1");
+    assert.equal(inlineRakutenJsonLd.length, 1);
+    assert.match(inlineRakutenJsonLd[0].image ?? "", /coat-shop\/cabinet\/coat-1\.jpg/);
+    assert.equal(inlineRakutenJsonLd[0].title, "Inline Raf Simons Coat");
+    assert.equal(adapter.cleanUrl("https://item.rakuten.co.jp/un", "Rakuten"), "");
+
+    const zenRakuten = adapter.zenMarketCardItems(`
+      <a class="product-item product-link" href="https://zenmarket.jp/en/rakutenproduct.aspx?itemCode=archive-shop%3Araf-001">
+        <div class="img-wrap"><img src="https://zenmarket.jp/img/fixture.jpg"></div>
+        <h3 class="item-title translate">Raf Simons Archive Sweater</h3>
+        <span class="current-price">¥12,800</span>
+      </a>
+    `, "Rakuten", "https://zenmarket.jp/en/search.aspx?q=raf+simons&p=1&searchMode=custom&stores=0");
+    assert.equal(zenRakuten.length, 1);
+    assert.equal(zenRakuten[0].publicPrice, 12800);
+    assert.equal(zenRakuten[0].publicCurrency, "JPY");
+    assert.match(zenRakuten[0].url, /zenmarket\.jp\/en\/rakutenproduct\.aspx/);
+
+    const zenStructured = adapter.zenMarketStructuredItems(JSON.stringify({
+      items: [{
+        storeId: 0,
+        storeName: "Rakuten",
+        itemCode: "opinion-cosme:10001695",
+        title: "Supreme Burberry Box Logo Hoodie",
+        price: 105000,
+        currency: "JPY",
+        imageUrl: "https://tshop.r10s.jp/opinion-cosme/fixture.jpg",
+      }],
+    }), "Rakuten", "https://zenmarket.jp/en/search.aspx?q=supreme&p=1&searchMode=custom&stores=0");
+    assert.equal(zenStructured.length, 1);
+    assert.match(zenStructured[0].url, /rakutenproduct\.aspx\?itemCode=opinion-cosme%3A10001695/);
+    assert.equal(zenStructured[0].publicPrice, 105000);
+    assert.equal(zenStructured[0].publicCurrency, "JPY");
+    assert.match(zenStructured[0].image ?? "", /tshop\.r10s\.jp/);
+
     const proxy = adapter.superbuyProxyUrl(goofish[0].url);
     assert.match(proxy, /superbuy\.com\/en\/page\/buy\/selfservice\//);
     assert.match(decodeURIComponent(proxy), /goofish\.com\/item\?id=1060593587010/);
@@ -160,13 +307,94 @@ test("parses Depop, Mercari Japan, and Goofish cards and builds a Superbuy proxy
     assert.match(publicSearchUrls[1].url, /html\.duckduckgo\.com/);
 
     const goofishSources = adapter.sourceSearchCandidates("Goofish", "raf simons", "active", 0);
-    assert.equal(goofishSources[0], "https://www.superbuy.com/en/page/search/?nTag=Home-search&from=search-input&keyword=raf+simons&platform=xy");
-    assert.match(goofishSources[1], /goofish\.com\/search\?q=raf%20simons&page=1/);
+    assert.match(goofishSources[0], /superbuy\.com\/en\/page\/fleamarket\//);
+    assert.match(goofishSources[0], /nTag=Home-search/);
+    assert.match(goofishSources[0], /from=search-input/);
+    assert.match(goofishSources[0], /keyword=raf\+simons/);
+    assert.doesNotMatch(goofishSources[0], /_search=|position=|platform=/);
+    assert.match(goofishSources[1], /superbuy\.com\/en\/page\/search\//);
+    assert.match(goofishSources[1], /nTag=Home-search/);
+    assert.match(goofishSources[2], /goofish\.com\/search\?q=raf%20simons&page=1/);
+
+    const rakutenSources = adapter.sourceSearchCandidates("Rakuten", "raf simons", "active", 0);
+    assert.match(rakutenSources[0], /zenmarket\.jp\/en\/search\.aspx\?q=raf%20simons&p=1&searchMode=custom&stores=0/);
+    assert.match(rakutenSources[1], /search\.rakuten\.co\.jp\/search\/mall\/raf%20simons\/\?p=1/);
+    assert.equal(rakutenSources.length, 2);
     const unwrapped = adapter.cleanUrl(
       adapter.superbuyProxyUrl("https://www.goofish.com/item?id=1060593587010"),
       "Goofish",
     );
     assert.equal(unwrapped, "https://www.goofish.com/item?id=1060593587010");
+    assert.equal(
+      adapter.cleanUrl("https://www.superbuy.com/en/page/buy/?platform=xy&itemId=1060593587012", "Goofish"),
+      "https://www.goofish.com/item?id=1060593587012",
+    );
+    assert.equal(
+      adapter.cleanUrl("https://www.superbuy.com/en/page/buy/?url=https%253A%252F%252F2.taobao.com%252Fitem.htm%253Fid%253D1060593587013", "Goofish"),
+      "https://www.goofish.com/item?id=1060593587013",
+    );
+
+    const originalStaticFetch = globalThis.fetch;
+    let directGoofishSearches = 0;
+    globalThis.fetch = async (input) => {
+      const value = String(input instanceof Request ? input.url : input);
+      if (value.includes("superbuy.com/en/page/fleamarket") || value.includes("superbuy.com/en/page/search")) {
+        if (value.includes("static-fallback-goofish")) return new Response("<html></html>");
+        return new Response(`<script>window.__INITIAL_STATE__ = {
+          "props":{"pageProps":{"items":[{"platform":"xianyu","goodsId":"1060593587555","goodsName":"Supreme Goofish Tee","goodsPrice":588,"currency":"CNY"}]}}
+        };</script>`);
+      }
+      if (value.includes("goofish.com/search")) {
+        directGoofishSearches += 1;
+        if (value.includes("static-fallback-goofish")) {
+          return new Response(`<script type="application/json">{
+            "items":[{"itemId":"1060593587556","itemTitle":"Fallback Goofish Tee","price":488,"currency":"CNY"}]
+          }</script>`);
+        }
+        return new Response("<html></html>");
+      }
+      if (value.includes("search.rakuten.co.jp")) {
+        return new Response(`<li class="searchresultitem">
+          <a href="https://item.rakuten.co.jp/archive-shop/raf-api/" title="Raf Simons API Jacket">
+            <img src="https://thumbnail.image.rakuten.co.jp/api.jpg" alt="Raf Simons API Jacket">
+          </a><div class="price">¥19,800</div>
+        </li>`);
+      }
+      if (value.includes("goofish.com/item") || value.includes("item.rakuten.co.jp")) {
+        throw new Error("fixture product hydration blocked");
+      }
+      return new Response("<html></html>");
+    };
+    try {
+      const goofishStaticResponse = await route.GET(new Request(
+        "http://localhost/api/listings?marketplace=Goofish&q=static-fixture-goofish&page=0&mode=active",
+      ));
+      const goofishStaticPayload = await goofishStaticResponse.json();
+      assert.equal(goofishStaticPayload.status, "live");
+      assert.equal(goofishStaticPayload.listings.length, 1);
+      assert.equal(goofishStaticPayload.listings[0].url, "https://www.goofish.com/item?id=1060593587555");
+      assert.match(goofishStaticPayload.listings[0].proxyUrl, /superbuy\.com/);
+      assert.equal(directGoofishSearches, 0, "direct Goofish must not run when Superbuy returns listings");
+
+      const goofishFallbackResponse = await route.GET(new Request(
+        "http://localhost/api/listings?marketplace=Goofish&q=static-fallback-goofish&page=0&mode=active",
+      ));
+      const goofishFallbackPayload = await goofishFallbackResponse.json();
+      assert.equal(goofishFallbackPayload.status, "live");
+      assert.equal(goofishFallbackPayload.listings[0].url, "https://www.goofish.com/item?id=1060593587556");
+      assert.equal(directGoofishSearches, 1, "direct Goofish should run only after an empty Superbuy response");
+
+      const rakutenStaticResponse = await route.GET(new Request(
+        "http://localhost/api/listings?marketplace=Rakuten&q=static-fixture-rakuten&page=0&mode=active",
+      ));
+      const rakutenStaticPayload = await rakutenStaticResponse.json();
+      assert.equal(rakutenStaticPayload.status, "live");
+      assert.equal(rakutenStaticPayload.listings.length, 1);
+      assert.equal(rakutenStaticPayload.listings[0].url, "https://item.rakuten.co.jp/archive-shop/raf-api/");
+      assert.ok(rakutenStaticPayload.listings[0].price > 0);
+    } finally {
+      globalThis.fetch = originalStaticFetch;
+    }
 
     const browserCalls = [];
     globalThis.__RML_BROWSER__ = {
@@ -185,6 +413,61 @@ test("parses Depop, Mercari Japan, and Goofish cards and builds a Superbuy proxy
               </li>
             </ol>
           `);
+        }
+        if (action === "content" && String(options.url).includes("zenmarket.jp/en/yahoo.aspx")) {
+          return new Response(`
+            <div id="productsContainer">
+              <a href="/en/auction.aspx?itemCode=x123456789" class="product-link product-item">
+                <img data-original="https://zenmarket.jp/img/jdirect-browser.jpg" alt="Raf Simons JDirect Jacket">
+                <h3 class="item-title">Raf Simons JDirect Jacket</h3>
+                <span class="current-price">¥31,000</span>
+                <div class="product-badge-store">JDirectItems Auction</div>
+              </a>
+            </div>
+          `);
+        }
+        if (action === "content" && String(options.url).includes("zenmarket.jp/en/rakuma.aspx")) {
+          return new Response(`
+            <div id="productsContainer">
+              <a href="/en/rakumaproduct.aspx?itemCode=rakuma-123" class="product-link product-item">
+                <img data-original="https://zenmarket.jp/img/rakuma-browser.jpg" alt="Raf Simons Rakuma Shirt">
+                <h3 class="item-title">Raf Simons Rakuma Shirt</h3>
+                <span class="current-price">¥16,500</span>
+                <div class="product-badge-store">Rakuma</div>
+              </a>
+            </div>
+          `);
+        }
+        if (action === "content" && String(options.url).includes("zenmarket.jp")) {
+          return new Response(`
+            <div id="productsContainer">
+              <div class="col-xs-6 product">
+                <a href="/en/rakutenproduct.aspx?itemCode=archive-shop%3Araf-browser" class="product-link product-item">
+                  <img data-original="https://zenmarket.jp/img/rakuten-browser.jpg" alt="Raf Simons ZenMarket Jacket">
+                  <h3 class="item-title translate">Raf Simons ZenMarket Jacket</h3>
+                  <span class="current-price">¥24,800</span>
+                  <div class="product-badge-store">Rakuten</div>
+                </a>
+              </div>
+              <a href="https://item.rakuten.co.jp/archive-shop/unrelated-footer-source/">Original store source</a>
+            </div>
+          `);
+        }
+        if (action === "content" && String(options.url).includes("search.rakuten.co.jp")) {
+          return new Response(`
+            <li class="searchresultitem">
+              <a href="https://item.rakuten.co.jp/archive-shop/raf-browser/" title="Raf Simons Browser Jacket">
+                <img src="https://thumbnail.image.rakuten.co.jp/browser.jpg" alt="Raf Simons Browser Jacket">
+              </a>
+              <div class="price">¥24,800</div>
+            </li>
+          `);
+        }
+        if (action === "content" && String(options.url).includes("superbuy.com")
+          && String(options.url).includes("browser-priority-goofish")) {
+          return new Response(`<script>window.__INITIAL_STATE__ = {
+            "items":[{"platformCode":"xianyu","goodsId":"1060593587999","goodsName":"Superbuy Rendered Goofish Jacket","goodsPrice":688,"currency":"CNY"}]
+          };</script>`);
         }
         if (action === "content") return new Response("<html><body><div id=app></div></body></html>");
         return new Response(JSON.stringify([
@@ -205,14 +488,78 @@ test("parses Depop, Mercari Japan, and Goofish cards and builds a Superbuy proxy
     assert.equal(depopBrowserCall.options.gotoOptions.waitUntil, "networkidle2");
     assert.match(depopBrowserCall.options.waitForSelector.selector, /products/);
 
+    const renderedRakuten = await adapter.browserRenderedItems(
+      "Rakuten",
+      [
+        "https://zenmarket.jp/en/search.aspx?q=raf%20simons&p=1&searchMode=custom&stores=0",
+        "https://search.rakuten.co.jp/search/mall/raf%20simons/?p=1",
+      ],
+    );
+    assert.equal(renderedRakuten.batches[0].items.length, 1);
+    assert.equal(renderedRakuten.batches[0].items[0].publicPrice, 24800);
+    assert.match(renderedRakuten.batches[0].items[0].url, /zenmarket\.jp\/en\/rakutenproduct\.aspx/);
+    const zenMarketBrowserCall = browserCalls.find((call) => call.action === "content" && String(call.options.url).includes("zenmarket.jp"));
+    assert.match(zenMarketBrowserCall.options.waitForSelector.selector, /productsContainer/);
+    assert.equal(
+      browserCalls.some((call) => call.action === "content" && String(call.options.url).includes("search.rakuten.co.jp")),
+      false,
+      "ZenMarket rendered results must stop the official Rakuten browser fallback",
+    );
+
+    const renderedJDirect = await adapter.browserRenderedItems(
+      "JDirectItems Auction",
+      ["https://zenmarket.jp/en/yahoo.aspx?q=raf%20simons&p=1"],
+    );
+    assert.equal(renderedJDirect.batches[0].items.length, 1);
+    assert.match(renderedJDirect.batches[0].items[0].url, /zenmarket\.jp\/en\/auction\.aspx/);
+    assert.equal(renderedJDirect.batches[0].items[0].publicPrice, 31000);
+
+    const renderedRakuma = await adapter.browserRenderedItems(
+      "Rakuten Rakuma",
+      ["https://zenmarket.jp/en/rakuma.aspx?q=raf%20simons&p=1"],
+    );
+    assert.equal(renderedRakuma.batches[0].items.length, 1);
+    assert.match(renderedRakuma.batches[0].items[0].url, /zenmarket\.jp\/en\/rakumaproduct\.aspx/);
+    assert.equal(renderedRakuma.batches[0].items[0].publicPrice, 16500);
+
     const renderedGoofish = await adapter.browserRenderedItems(
       "Goofish",
-      ["https://www.superbuy.com/en/page/search/?keyword=supreme&platform=xy"],
+      ["https://www.superbuy.com/en/page/search/?nTag=Home-search&from=search-input&keyword=supreme"],
     );
     assert.equal(renderedGoofish.batches[0].items.length, 2);
     assert.equal(renderedGoofish.batches[0].items[0].url, "https://www.goofish.com/item?id=1060593587010");
     assert.equal(renderedGoofish.batches[0].items[1].url, "https://www.goofish.com/item?id=1060593587011");
     assert.ok(browserCalls.some((call) => call.action === "links"));
+    const superbuyBrowserCall = browserCalls.find((call) => call.action === "content" && String(call.options.url).includes("superbuy.com"));
+    assert.equal(superbuyBrowserCall.options.waitForTimeout, 9000);
+    assert.equal("waitForSelector" in superbuyBrowserCall.options, false);
+
+    const regularBrowserFixture = globalThis.__RML_BROWSER__;
+    const retryCalls = [];
+    globalThis.__RML_BROWSER__ = {
+      async quickAction(action, options) {
+        retryCalls.push({ action, options });
+        if (action === "content" && "waitForSelector" in options) throw new Error("fixture selector timeout");
+        if (action === "content") return new Response(`
+          <div id="productsContainer">
+            <a class="product-item product-link" href="/en/rakutenproduct.aspx?itemCode=retry-shop%3A1001">
+              <h3 class="item-title">ZenMarket Retry Jacket</h3>
+              <span class="current-price">¥18,500</span>
+            </a>
+          </div>
+        `);
+        return new Response("[]", { headers: { "content-type": "application/json" } });
+      },
+    };
+    const retryUrl = "https://zenmarket.jp/en/search.aspx?q=retry&p=1&searchMode=custom&stores=0";
+    const retryHtml = await adapter.fetchRenderedText(retryUrl);
+    const retryItems = adapter.directItems(retryHtml, "Rakuten", retryUrl);
+    assert.equal(retryItems.length, 1);
+    assert.equal(retryCalls.length, 2);
+    assert.ok("waitForSelector" in retryCalls[0].options);
+    assert.equal(retryCalls[1].options.waitForTimeout, 10000);
+    assert.equal("waitForSelector" in retryCalls[1].options, false);
+    globalThis.__RML_BROWSER__ = regularBrowserFixture;
 
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async () => { throw new Error("fixture direct fetch blocked"); };
@@ -238,6 +585,51 @@ test("parses Depop, Mercari Japan, and Goofish cards and builds a Superbuy proxy
       assert.equal(goofishPayload.diagnostics.discoveredUrls, 2);
       assert.equal(goofishPayload.listings.length, 2);
       assert.match(goofishPayload.listings[0].proxyUrl, /superbuy\.com/);
+
+      const priorityGoofishResponse = await route.GET(new Request(
+        "http://localhost/api/listings?marketplace=Goofish&q=browser-priority-goofish&page=0&mode=active",
+      ));
+      const priorityGoofishPayload = await priorityGoofishResponse.json();
+      assert.equal(priorityGoofishPayload.status, "live");
+      assert.equal(priorityGoofishPayload.listings.length, 1);
+      assert.equal(priorityGoofishPayload.listings[0].url, "https://www.goofish.com/item?id=1060593587999");
+      assert.ok(priorityGoofishPayload.diagnostics.browserRenderedUrls.every((url) => url.includes("superbuy.com")));
+
+      const priorityRakutenResponse = await route.GET(new Request(
+        "http://localhost/api/listings?marketplace=Rakuten&q=browser-priority-rakuten&page=0&mode=active",
+      ));
+      const priorityRakutenPayload = await priorityRakutenResponse.json();
+      assert.equal(priorityRakutenPayload.status, "live");
+      assert.equal(priorityRakutenPayload.listings.length, 1);
+      assert.match(priorityRakutenPayload.listings[0].url, /zenmarket\.jp\/en\/rakutenproduct\.aspx/);
+      assert.ok(priorityRakutenPayload.diagnostics.browserRenderedUrls.every((url) => url.includes("zenmarket.jp")));
+
+
+      const [jdirectResponse, rakutenBatchResponse, rakumaResponse] = await Promise.all([
+        route.GET(new Request(
+          "http://localhost/api/listings?marketplace=JDirectItems%20Auction&q=zenmarket-batch&page=0&mode=active&provider=zenmarket&providerBatchSize=3&providerBatchIndex=1",
+        )),
+        route.GET(new Request(
+          "http://localhost/api/listings?marketplace=Rakuten&q=zenmarket-batch&page=0&mode=active&provider=zenmarket&providerBatchSize=3&providerBatchIndex=2",
+        )),
+        route.GET(new Request(
+          "http://localhost/api/listings?marketplace=Rakuten%20Rakuma&q=zenmarket-batch&page=0&mode=active&provider=zenmarket&providerBatchSize=3&providerBatchIndex=3",
+        )),
+      ]);
+      const [jdirectPayload, rakutenBatchPayload, rakumaPayload] = await Promise.all([
+        jdirectResponse.json(), rakutenBatchResponse.json(), rakumaResponse.json(),
+      ]);
+      assert.equal(jdirectPayload.status, "live");
+      assert.equal(rakutenBatchPayload.status, "live");
+      assert.equal(rakumaPayload.status, "live");
+      for (const payload of [jdirectPayload, rakutenBatchPayload, rakumaPayload]) {
+        assert.equal(payload.diagnostics.sourceProvider, "ZenMarket");
+        assert.equal(payload.diagnostics.providerBatchSize, 3);
+        assert.ok(payload.diagnostics.browserRenderedUrls.every((url) => url.includes("zenmarket.jp")));
+      }
+      assert.equal(jdirectPayload.diagnostics.providerMarket.storeCode, "28");
+      assert.equal(rakutenBatchPayload.diagnostics.providerMarket.storeCode, "0");
+      assert.equal(rakumaPayload.diagnostics.providerMarket.storeCode, "25");
     } finally {
       globalThis.fetch = originalFetch;
       delete globalThis.__RML_BROWSER__;

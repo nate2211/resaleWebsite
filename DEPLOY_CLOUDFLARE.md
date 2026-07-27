@@ -17,7 +17,7 @@ Cloudflare serves `build/index.html` for navigation paths that do not match a st
 
 ## Development styling and marketplace rendering
 
-`npm run dev:windows` starts Vinext with the Cloudflare Vite environment. This keeps
+`npm run dev:windows` starts the Vinext App Router development server with the Cloudflare Vite environment. This keeps
 `app/globals.css` on Vite hot reload while also attaching the remote Browser Run
 binding used only when ordinary public marketplace requests return zero cards.
 Authenticate with Cloudflare once before using the remote binding:
@@ -35,7 +35,7 @@ npm run dev:local:windows
 ```
 
 The local-only mode still loads the complete stylesheet, but JavaScript-heavy
-marketplace fallbacks such as rendered Depop or Goofish results are unavailable.
+marketplace fallbacks and AI web browsing such as rendered Depop, ZenMarket/Rakuten, and public product pages are unavailable.
 
 ## Production styling
 
@@ -75,6 +75,27 @@ npm run deploy:static
 The full-stack command uses the official Vinext Cloudflare deployment adapter,
 keeps `/api/*` on the same origin as the browser application, and includes the
 `BROWSER` binding declared in `wrangler.vinext-build.toml`. Ordinary HTTP is tried
-first; Browser Run renders Depop or Goofish/Superbuy only when no public cards were
-found. The browser binding uses remote mode in development because Quick Actions do
-not run in the local-only Workers runtime.
+first; Browser Run renders built-in dynamic marketplace sources when no public cards are found. AI Search uses Browser Run content and link extraction for JavaScript-heavy search/product pages, but filters out all built-in marketplace domains so the AI card contributes additional stores. The AI button still runs selected built-in adapters and Rakuten through ZenMarket in the same bounded parallel batch. The browser binding uses remote mode in development because Quick Actions do not run in the local-only Workers runtime.
+
+## Worker runtime module during Vinext builds
+
+The Browser Run binding is read with `import("cloudflare:workers")`, which is
+the binding-access pattern recommended by Vinext and Cloudflare. This module is
+provided by the Workers runtime and is not an npm package. `vite.config.ts`
+therefore lists `cloudflare:workers` in `build.rolldownOptions.external`; without
+that entry, Vinext's client-reference analysis can fail before the server build
+with a module-resolution error.
+
+
+## Vinext development root route
+
+The full-stack Vite configuration reads `wrangler.vinext-build.toml`. That file
+must declare `main = "vinext/server/app-router-entry"`, and its asset fallback must be
+`not_found_handling = "none"`. The Worker entry delegates requests to
+`vinext/server/app-router-entry`. Using an assets-only SPA Wrangler file for Vinext
+development causes repeated `GET / 404` responses because the asset middleware
+handles `/` before the App Router.
+
+## Local console diagnostics
+
+Runtime PWA links are relative to the active origin, so localhost must request `/manifest.webmanifest`, `/favicon.svg`, and icons from port 5173 rather than the production hostname. `contentscript.js` / `ObjectMultiplex` liveness warnings come from injected browser extensions and are not part of the Worker or React bundle. Use a clean browser profile when verifying the application console. Transient same-origin API failures are retried, and query/page fetching is concurrency-limited.

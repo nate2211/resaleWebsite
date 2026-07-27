@@ -35,12 +35,12 @@ test("collapsible Search discovers unfamiliar public listing sites safely", asyn
     source("app/lib/analysis.ts"),
   ]);
 
-  assert.match(page, /<strong>AI Search<\/strong>/);
+  assert.match(page, /<h2>AI Search<\/h2>/);
   assert.match(page, /aiWebSearchSelected/);
-  assert.match(page, /internationalMarketsOpen && aiWebSearchSelected/);
+  assert.match(page, /internationalMarketsOpen && \(aiWebSearchSelected \|\| forceAiSearch\)/);
   assert.match(page, /includeAiSearch/);
   assert.match(page, /fetchAiWebListingResults/);
-  assert.match(page, /standard web discovery/);
+  assert.match(page, /Exact-query secondhand discovery/);
   assert.match(page, /\/api\/web-listings/);
   assert.match(page, /webSearchAbortController\.current\?\.abort\(\)/);
   assert.match(page, /setWebSearchListings\(\[\]\)/);

@@ -11,13 +11,19 @@ const MARKET_URLS = {
   "JDirectItems Auction": (query: string) =>
     `https://zenmarket.jp/en/yahoo.aspx?q=${encodeURIComponent(query)}&p=1`,
   Rakuten: (query: string) =>
-    `https://zenmarket.jp/en/rakuten.aspx?q=${encodeURIComponent(query)}&p=1`,
+    `https://zenmarket.jp/en/search.aspx?q=${encodeURIComponent(query)}&p=1&searchMode=custom&stores=0`,
   "Rakuten Rakuma": (query: string) =>
     `https://zenmarket.jp/en/rakuma.aspx?q=${encodeURIComponent(query)}&p=1`,
   Bunjang: (query: string) =>
     `https://globalbunjang.com/search?q=${encodeURIComponent(query)}`,
-  Goofish: (query: string) =>
-    `https://www.goofish.com/search?q=${encodeURIComponent(query)}`,
+  Goofish: (query: string) => {
+    const params = new URLSearchParams({
+      nTag: "Home-search",
+      from: "search-input",
+      keyword: query,
+    });
+    return `https://www.superbuy.com/en/page/search/?${params.toString()}`;
+  },
 };
 
 function cleanText(value: string) {

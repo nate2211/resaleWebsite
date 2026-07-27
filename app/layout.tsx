@@ -1,10 +1,11 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
-const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "https://resalemasterlab.com";
+const configuredSiteUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim();
+const siteUrl = configuredSiteUrl || "https://resalemasterlab.com";
 
 export const metadata: Metadata = {
-  metadataBase: new URL(siteUrl),
+  metadataBase: configuredSiteUrl ? new URL(configuredSiteUrl) : undefined,
   title: {
     default: "ResaleMasterLab — Resale Listing Research and Monitoring",
     template: "%s | ResaleMasterLab",
@@ -19,8 +20,7 @@ export const metadata: Metadata = {
   authors: [{ name: "ResaleMasterLab" }],
   creator: "ResaleMasterLab",
   publisher: "ResaleMasterLab",
-  alternates: { canonical: "/" },
-  manifest: "/manifest.webmanifest",
+  alternates: { canonical: siteUrl },
   robots: {
     index: true,
     follow: true,
@@ -35,25 +35,17 @@ export const metadata: Metadata = {
   openGraph: {
     type: "website",
     locale: "en_US",
-    url: "/",
+    url: siteUrl,
     siteName: "ResaleMasterLab",
     title: "ResaleMasterLab — Evidence-led resale research",
     description: "Find, compare, analyze, and monitor apparel resale listings in one commercial research workspace.",
-    images: [{ url: "/og-card.png", width: 1200, height: 630, alt: "ResaleMasterLab resale research workspace" }],
+    images: [{ url: `${siteUrl}/og-card.png`, width: 1200, height: 630, alt: "ResaleMasterLab resale research workspace" }],
   },
   twitter: {
     card: "summary_large_image",
     title: "ResaleMasterLab — Evidence-led resale research",
     description: "Search and monitor resale listings with sold-price, fee, engagement, authenticity, and optional local AI analysis.",
-    images: ["/og-card.png"],
-  },
-  icons: {
-    icon: [
-      { url: "/favicon.svg", type: "image/svg+xml" },
-      { url: "/icon-192.png", sizes: "192x192", type: "image/png" },
-    ],
-    shortcut: "/favicon.svg",
-    apple: [{ url: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
+    images: [`${siteUrl}/og-card.png`],
   },
   category: "technology",
 };
@@ -98,6 +90,13 @@ const structuredData = {
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
+      <head>
+        {/* Keep runtime assets origin-relative so localhost, LAN previews, and production all use the active host. */}
+        <link rel="manifest" href="/manifest.webmanifest" />
+        <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+        <link rel="icon" href="/icon-192.png" sizes="192x192" type="image/png" />
+        <link rel="apple-touch-icon" href="/apple-touch-icon.png" sizes="180x180" />
+      </head>
       <body className="antialiased">
         <script
           type="application/ld+json"

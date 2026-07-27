@@ -7,7 +7,7 @@ const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8")
 test("real listing scans isolate request and response failures", () => {
   assert.match(page, /async function readApiJson/);
   assert.match(page, /returned an HTML page instead of JSON/);
-  assert.match(page, /Promise\.allSettled\(queries\.map/);
+  assert.match(page, /settleInBatches\(queries, 2/);
   assert.match(page, /controller\.signal\.aborted \|\| generation !== requestGeneration\.current/);
   assert.match(page, /requestErrorMessage\(error, "The selected marketplace scan failed\."\)/);
   assert.match(page, /onClick=\{\(\) => \{ void loadRealListings\(false\); \}\}/);

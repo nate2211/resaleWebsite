@@ -4567,3 +4567,45 @@ body {
   font-size: 0.86rem;
   font-weight: 650;
 }
+
+
+/* AI Search now occupies the former sixth international-market card. */
+.ai-marketplace-card .marketplace-actions {
+  align-items: center;
+}
+
+.ai-marketplace-card .marketplace-actions small {
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.ai-market-search-field {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-height: 44px;
+  padding: 0 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.ai-market-search-field:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.ai-market-search-field span {
+  color: var(--muted);
+  font-size: 1.05rem;
+}
+
+.ai-market-search-field input {
+  min-width: 0;
+  width: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}

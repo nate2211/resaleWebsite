@@ -4,10 +4,10 @@ Updated July 27, 2026.
 
 Passed in this packaging environment:
 
-- TypeScript/TSX syntax transpilation for the complete application, route, and Worker tree; structural checks for the React client, deterministic analysis,
+- TypeScript/TSX syntax transpilation for all 32 application and route files; structural checks for the React client, deterministic analysis,
   local-model intelligence, safe public-web reader, engagement/authenticity
   research, favorites persistence, and listing-monitor API
-- 35 source/regression tests: 34 passed and one rendered-preview test skipped because no production artifact is bundled. Coverage includes executable Depop, Mercari Japan, Goofish/Superbuy, indexed-search redirect, sold-listing, article-filter, and append-pagination fixtures
+- 44 source/regression tests: 43 passed and one rendered-preview test skipped because no production artifact is bundled. Coverage includes executable AI Browser Run discovery, paired Rakuten JSON-LD image/title/price/URL extraction, Depop, Mercari Japan, ZenMarket-card parsing, marketplace selection, indexed-search redirect, sold-listing, article-filter, and append-pagination fixtures
 - empty-workspace checks confirming that demo listings, synthetic comparable
   prices, and generated resale projections are not preloaded
 - listing-monitor checks for active, sold, removed, and unknown states, with
@@ -17,17 +17,21 @@ Passed in this packaging environment:
 - guarded JSON-response handling, per-query failure isolation, state-safe append pagination, and non-throwing real-listing / Deep Inspection request paths
 - article-specific search and result filters for T-shirts, sweatshirts, hoodies, knitwear, outerwear, bottoms, shoes, bags, and accessories
 - The supplied current Depop search source was executed against the production parser and returned 21 unique canonical product cards; the first discounted listing retained its $34 sale price, size, image, and boosted state
-- Superbuy/Xianyu discovery now combines the exact `platform=xy` page, direct Goofish search, a Cloudflare Browser Run rendered-content and rendered-links fallback, Bing RSS, Bing HTML, and DuckDuckGo HTML; canonical item URLs remain visible with an explicit unknown price when item-page hydration is blocked
-- End-to-end route fixtures force ordinary HTTP to fail, then verify that the Browser Run fallback changes both Depop and Goofish API responses from `unavailable` to `live`, including priced Depop cards and Goofish Superbuy handoff links
+- Goofish has been removed from the selectable marketplace arrays, international cards, research aliases, and FAQ source list. A dedicated AI Search card now occupies its former sixth grid position with an Include toggle, query field, status, and Run AI Search action. Legacy Goofish parser types remain internal only so older saved records do not crash.
+- End-to-end route fixtures force ordinary HTTP to fail, then verify that Browser Run changes Depop and all three ZenMarket-backed adapters—JDirectItems Auction, Rakuten, and Rakuma—from `unavailable` to `live`. The AI route fixture proves direct rendered discovery returns priced eBay, Mercari US, and public Facebook Marketplace item pages plus an outside shop while filtering a built-in Depop result from the same rendered search. Rakuten remains in the built-in parallel batch and preserves paired image, title, canonical URL, and converted price.
 - JSON parsing, CSS structure, shell syntax, source archive hygiene, and ZIP
   CRC/integrity validation
 
+- Vinext 0.0.50 full-stack routing is configured with `main = "vinext/server/app-router-entry"`, the package export supported by this release. The unsupported `vinext/server/fetch-handler` custom Worker import has been removed.
+- Every build command first runs `scripts/validate-vinext-entry.mjs`, which verifies the installed Vinext package export and Wrangler entry before Rolldown starts.
+
 The rendered Worker preview test is skipped when `dist/server/index.js` is not
 present. The assets-only release additionally validates that production preparation
-accepts either a full-stack Vinext Worker artifact (`wrangler.json`, JavaScript, and compiled CSS) or a true static export containing `build/index.html`. The production source was transpiled with TypeScript 5.8 in no-check mode, and the full regression, SEO, JSON, TOML, CSS, shell, and archive checks passed. A dependency-backed Vinext build was attempted, but the packaging environment's internal npm registry returned repeated HTTP 503 responses while installing dependencies. The source tree was therefore validated with the globally available TypeScript 5.8.3 compiler, executable route/parser fixtures, the full Node test suite, SEO/TOML/JSON checks, and archive integrity checks. No partial dependency cache, `node_modules`, `.next`, `dist`, or TypeScript build-info file is included in the ZIP.
+accepts either a full-stack Vinext Worker artifact (`wrangler.json`, JavaScript, and compiled CSS) or a true static export containing `build/index.html`. The production source was transpiled with the available TypeScript compiler in no-check mode, and the full regression, SEO, JSON, TOML, CSS, shell, and archive checks passed. A dependency-backed Vinext build was attempted, but dependency installation did not complete within the packaging environment's command timeout. The source tree was therefore validated with the globally available TypeScript 5.8.3 compiler, executable route/parser fixtures, the full Node test suite, SEO/TOML/JSON checks, and archive integrity checks. No partial dependency cache, `node_modules`, `.next`, `dist`, or TypeScript build-info file is included in the ZIP.
 
-- AI Search remains a checkbox-only public-web target with no custom domain or
-  secondary query field.
+- AI Search is a full marketplace-style card in the former Goofish position, with its own visible query field sharing the primary query state, Include control, status, and Run AI Search action. The route directly targets eBay search/item pages, Mercari US search and `/us/item/` pages, and public Facebook Marketplace search/item pages, then supplements them with static Bing RSS/HTML, DuckDuckGo, Brave, and Cloudflare Browser Run content/link extraction. It excludes only built-in adapter paths, limits each hostname to four results, keeps the literal query first, adds bounded AI query expansions, runs every selected marketplace in parallel, and force-includes Rakuten through ZenMarket in the built-in batch.
+- Runtime PWA links are origin-relative, so local development loads the manifest, favicon, and install icons from port 5173 instead of the production hostname. Client API requests and server public-page reads retry transient failures, while marketplace query variations and AI page reads use bounded concurrency.
+- `contentscript.js` / `ObjectMultiplex` liveness warnings were confirmed absent from the source tree and documented as injected browser-extension output rather than application listeners.
 - Browse supports article, marketplace, condition, size, listed-after,
   listed-before, minimum/maximum price, newest/oldest, and price-direction filters.
 - Public About, Methodology, FAQ, Contact, Accessibility, Privacy, and Terms
@@ -38,3 +42,7 @@ accepts either a full-stack Vinext Worker artifact (`wrangler.json`, JavaScript,
 
 
 - Marketplace API responses use `Cache-Control: no-store` so empty source results cannot remain cached by browsers or Cloudflare.
+
+- The three ZenMarket adapters are modeled separately: JDirectItems Auction uses store `28`, Rakuten uses store `0`, and Rakuma uses store `25`. Each proxy route receives static parsing and Browser Run before its original-market fallback; ZenMarket renders share a two-slot queue so selecting all three does not overload the binding. Rakuten discovery uses the captured canonical cross-site query (`/en/search.aspx?q=<query>&p=<page>&searchMode=custom&stores=0`) as its primary route. Rendered doT cards and structured AJAX/JSON records retain title, image, condition, JPY price, and the correct adapter-specific ZenMarket product URL.
+- The supplied current ZenMarket search capture was executed against the production parser. It correctly returns zero static product cards because it is a JavaScript/AJAX shell, so it proceeds to Browser Run instead of producing false listings or prematurely selecting the official Rakuten fallback.
+- Rakuten recovery now parses product-level JSON-LD and inline ItemList records so each title, JPY price, canonical URL, and image stays paired. Truncated item URLs are rejected, discovered images survive hydration when detail pages omit metadata, and rendered product images use `referrerPolicy="no-referrer"` to avoid referrer-based CDN failures.

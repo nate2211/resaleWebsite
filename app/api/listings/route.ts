@@ -42,8 +42,8 @@ type BrowserRenderedBatch = {
 };
 
 declare global {
-  // The Vinext Worker entry exposes the request-scoped Browser Run binding here.
-  // Plain Vite development leaves it undefined and continues using direct fetches.
+  // Test-only injection point. Production and Cloudflare-enabled development
+  // read the binding from the native `cloudflare:workers` environment below.
   // eslint-disable-next-line no-var
   var __RML_BROWSER__: BrowserRunBinding | undefined;
 }
@@ -52,7 +52,28 @@ const MARKETS: Marketplace[] = [
   "Depop", "Grailed", "Poshmark", "Mercari Japan", "JDirectItems Auction",
   "Rakuten", "Rakuten Rakuma", "Bunjang", "Goofish",
 ];
+const ZENMARKET_MARKETS = ["JDirectItems Auction", "Rakuten", "Rakuten Rakuma"] as const;
+const ZENMARKET_ADAPTER = {
+  "JDirectItems Auction": { storeCode: "28", route: "yahoo.aspx" },
+  Rakuten: { storeCode: "0", route: "search.aspx" },
+  "Rakuten Rakuma": { storeCode: "25", route: "rakuma.aspx" },
+} as const;
 const cache = new Map<string, { until: number; value: unknown }>();
+let zenMarketBrowserActive = 0;
+const zenMarketBrowserWaiters: Array<() => void> = [];
+
+async function withZenMarketBrowserSlot<T>(task: () => Promise<T>) {
+  if (zenMarketBrowserActive >= 2) {
+    await new Promise<void>((resolve) => zenMarketBrowserWaiters.push(resolve));
+  }
+  zenMarketBrowserActive += 1;
+  try {
+    return await task();
+  } finally {
+    zenMarketBrowserActive -= 1;
+    zenMarketBrowserWaiters.shift()?.();
+  }
+}
 const MAX_HTML = 4_500_000;
 let grailedSearchConfig: {
   until: number; appId: string; apiKey: string;
@@ -121,6 +142,42 @@ function slugifySearch(value: string) {
     .slice(0, 80);
 }
 
+type SuperbuySearchVariant = "catalog" | "fleamarket";
+
+/**
+ * Superbuy's current search page uses the same URL contract exposed by its
+ * homepage search control: `nTag=Home-search`, `from=search-input`, and the
+ * user's text in `keyword`. The HTML source does not expose `_search`,
+ * `position`, or a `platform` selector, so do not manufacture those values.
+ *
+ * The catalog route is the real keyword-results page. The second-hand route is
+ * retained as a bounded Xianyu-aware fallback because Superbuy identifies it
+ * as the official entry point for used-item purchasing.
+ */
+function superbuySearchUrl(
+  query: string,
+  page = 0,
+  variant: SuperbuySearchVariant = "catalog",
+) {
+  const params = new URLSearchParams({
+    nTag: "Home-search",
+    from: "search-input",
+    keyword: query,
+  });
+  if (page > 0) params.set("page", String(page + 1));
+  const route = variant === "fleamarket" ? "fleamarket" : "search";
+  return `https://www.superbuy.com/en/page/${route}/?${params.toString()}`;
+}
+
+function superbuySearchUrls(query: string, page = 0) {
+  return [
+    // Goofish/Xianyu is a second-hand marketplace, so give Superbuy's
+    // dedicated second-hand entry point the first opportunity to render cards.
+    superbuySearchUrl(query, page, "fleamarket"),
+    superbuySearchUrl(query, page, "catalog"),
+  ];
+}
+
 function superbuyProxyUrl(sourceUrl: string) {
   const params = new URLSearchParams({
     from: "search-input",
@@ -166,8 +223,12 @@ function sourceSearchCandidates(
   }
   if (marketplace === "Rakuten") {
     return [
-      `https://zenmarket.jp/en/rakuten.aspx?q=${q}&p=${p}`,
+      // ZenMarket's current Rakuten search source declares this exact canonical
+      // query and store selector. Keep it first so proxy links and prices come
+      // from the route the user sees in ZenMarket.
       `https://zenmarket.jp/en/search.aspx?q=${q}&p=${p}&searchMode=custom&stores=0`,
+      // Rakuten's public search remains a useful original-market fallback and
+      // exposes canonical item.rakuten.co.jp product links in rendered cards.
       `https://search.rakuten.co.jp/search/mall/${q}/?p=${p}`,
     ];
   }
@@ -179,14 +240,11 @@ function sourceSearchCandidates(
     ];
   }
   if (marketplace === "Bunjang") return [`https://globalbunjang.com/search?q=${q}&page=${p}`];
-  const superbuy = new URL("https://www.superbuy.com/en/page/search/");
-  superbuy.searchParams.set("nTag", "Home-search");
-  superbuy.searchParams.set("from", "search-input");
-  superbuy.searchParams.set("keyword", query);
-  superbuy.searchParams.set("platform", "xy");
-  if (page > 0) superbuy.searchParams.set("page", p);
   return [
-    superbuy.toString(),
+    // Exhaust Superbuy's verified catalog and second-hand query routes before
+    // touching Goofish directly. This keeps Superbuy as the primary discovery
+    // path while retaining a bounded public fallback.
+    ...superbuySearchUrls(query, page),
     `https://www.goofish.com/search?q=${q}&page=${p}`,
   ];
 }
@@ -205,7 +263,7 @@ function listingPath(marketplace: Marketplace) {
   return "zenmarket.jp";
 }
 
-function cleanUrl(value: string, marketplace: Marketplace) {
+function cleanUrl(value: string, marketplace: Marketplace): string {
   try {
     const url = new URL(value.replaceAll("&amp;", "&"));
     const host = url.hostname.toLowerCase();
@@ -223,13 +281,54 @@ function cleanUrl(value: string, marketplace: Marketplace) {
     if (marketplace === "Bunjang" && (!host.endsWith("globalbunjang.com") || !path.includes("/product/"))) return "";
     if (marketplace === "Goofish") {
       if (host.endsWith("superbuy.com")) {
-        for (const key of ["url", "itemUrl", "item_url", "goodsUrl", "productUrl", "link"]) {
+        for (const key of [
+          "url", "itemUrl", "item_url", "goodsUrl", "goods_url", "productUrl",
+          "product_url", "originUrl", "origin_url", "sourceUrl", "source_url", "link",
+        ]) {
           const wrapped = url.searchParams.get(key);
           if (!wrapped) continue;
           let decoded = wrapped;
-          try { decoded = decodeURIComponent(wrapped); } catch { /* already decoded */ }
-          const unwrapped = cleanUrl(decoded, marketplace);
+          for (let pass = 0; pass < 3; pass += 1) {
+            try {
+              const next = decodeURIComponent(decoded);
+              if (next === decoded) break;
+              decoded = next;
+            } catch { break; }
+          }
+          const unwrapped: string = cleanUrl(decoded.replaceAll("\\/", "/"), marketplace);
           if (unwrapped) return unwrapped;
+        }
+        // Some Superbuy routes embed the original marketplace URL in a hash,
+        // serialized state, or another encoded query value instead of a stable
+        // `url=` parameter. Recover that canonical Xianyu/Goofish link before
+        // rejecting the wrapper.
+        let serialized = url.toString().replaceAll("&amp;", "&").replaceAll("\\/", "/");
+        for (let pass = 0; pass < 3; pass += 1) {
+          try {
+            const next = decodeURIComponent(serialized);
+            if (next === serialized) break;
+            serialized = next;
+          } catch { break; }
+        }
+        const embedded = serialized.match(/https?:\/\/(?:www\.)?goofish\.com\/item\?[^#"'\s<>]*\bid=\d{6,}/i)?.[0]
+          || serialized.match(/https?:\/\/2\.taobao\.com\/item\.htm\?[^#"'\s<>]*\bid=\d{6,}/i)?.[0];
+        if (embedded) {
+          const unwrapped: string = cleanUrl(embedded, marketplace);
+          if (unwrapped) return unwrapped;
+        }
+        const platform = [
+          url.searchParams.get("platform"), url.searchParams.get("source"),
+          url.searchParams.get("site"), url.searchParams.get("channel"),
+          path.includes("fleamarket") ? "xianyu" : "",
+        ].filter(Boolean).join(" ").toLowerCase();
+        const wrappedId = [
+          "itemId", "item_id", "itemIdStr", "item_id_str", "numIid", "num_iid",
+          "goodsId", "goods_id", "productId", "product_id", "offerId", "offer_id", "id",
+        ]
+          .map((key) => url.searchParams.get(key))
+          .find((value) => /^\d{6,}$/.test(value || ""));
+        if (wrappedId && /(?:^|\b)(?:xy|xianyu|goofish)(?:\b|$)/i.test(platform)) {
+          return `https://www.goofish.com/item?id=${wrappedId}`;
         }
         return "";
       }
@@ -248,11 +347,15 @@ function cleanUrl(value: string, marketplace: Marketplace) {
       const zenHost = host.endsWith("zenmarket.jp");
       const itemParameter = ["itemCode", "itemcode", "auctionid", "auctionId", "productid", "productId", "id"]
         .some((key) => url.searchParams.has(key));
-      const zenProduct = zenHost && (
-        path.includes("/auction.aspx") || path.includes("/rakutenproduct.aspx")
-        || path.includes("/rakumaproduct.aspx") || path.includes("/mercari.aspx")
-        || path.includes("/othershop.aspx") || path.includes("/item.aspx")
-        || (path.includes("/product.aspx") && itemParameter) || itemParameter
+      // Keep each ZenMarket adapter on its own product-detail route. The search
+      // shell contains hundreds of category/navigation URLs (including
+      // mercari.aspx?c=...), which must never count as Rakuten listing cards.
+      const zenProduct = zenHost && itemParameter && (
+        marketplace === "JDirectItems Auction"
+          ? path.includes("/auction.aspx")
+          : marketplace === "Rakuten"
+            ? path.includes("/rakutenproduct.aspx")
+            : path.includes("/rakumaproduct.aspx")
       );
       const originalProduct = marketplace === "JDirectItems Auction"
         ? (host.endsWith("auctions.yahoo.co.jp") && /\/auction\//.test(path))
@@ -260,6 +363,13 @@ function cleanUrl(value: string, marketplace: Marketplace) {
           ? host === "item.rakuten.co.jp"
           : host === "item.fril.jp" || (host.endsWith("fril.jp") && /\/item\//.test(path));
       if (!zenProduct && !originalProduct) return "";
+      if (marketplace === "Rakuten" && host === "item.rakuten.co.jp") {
+        const segments = url.pathname.split("/").filter(Boolean);
+        // Canonical Rakuten product URLs contain both a shop and item segment.
+        // Search snippets such as /un or /atlanti are truncated evidence and
+        // must not become cards because they cannot hydrate an image or detail.
+        if (segments.length < 2 || segments.some((segment) => segment.length < 2)) return "";
+      }
     }
     url.hash = "";
     url.searchParams.delete("srsltid");
@@ -312,6 +422,33 @@ function nestedText(value: unknown, ...keys: string[]) {
     if (found) return found;
   }
   return "";
+}
+
+function normalizedRecordKey(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+/**
+ * Marketplace JSON changes casing and separators frequently (`itemId`,
+ * `item_id`, `ItemID`, etc.). Resolve aliases case-insensitively so a source
+ * deployment does not silently erase otherwise valid listing records.
+ */
+function recordValue(record: Record<string, unknown>, aliases: string[]) {
+  const wanted = new Set(aliases.map(normalizedRecordKey));
+  for (const [key, value] of Object.entries(record)) {
+    if (wanted.has(normalizedRecordKey(key)) && value !== null && value !== undefined && value !== "") {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+function recordText(record: Record<string, unknown>, aliases: string[]) {
+  return text(recordValue(record, aliases));
+}
+
+function recordNumber(record: Record<string, unknown>, aliases: string[]) {
+  return number(recordValue(record, aliases));
 }
 
 function imageFromValue(value: unknown, base: string): string {
@@ -386,30 +523,99 @@ async function fetchText(url: string, accept: string, timeout = 9_000) {
   }
 }
 
-function browserRunBinding() {
-  return globalThis.__RML_BROWSER__;
+async function browserRunBinding() {
+  // Keep the injectable binding for deterministic Node-based adapter tests.
+  if (globalThis.__RML_BROWSER__) return globalThis.__RML_BROWSER__;
+
+  // Vinext's supported Cloudflare integration exposes bindings directly from
+  // `cloudflare:workers`; a custom Worker entry is neither needed nor used.
+  try {
+    const runtime = await import("cloudflare:workers");
+    const binding = (runtime.env as { BROWSER?: BrowserRunBinding }).BROWSER;
+    return binding;
+  } catch {
+    // Node-only development can continue with ordinary public fetches.
+    return undefined;
+  }
 }
 
 function browserLoadOptions(url: string) {
   const host = new URL(url).hostname.toLowerCase();
-  const depop = host.endsWith("depop.com");
-  return {
+  const selector = host.endsWith("depop.com")
+    ? 'a[href*="/products/"]'
+    : host.endsWith("goofish.com")
+      ? 'a[href*="/item?id="],a[href*="goofish.com/item"]'
+      : host === "search.rakuten.co.jp"
+        ? 'a[href*="item.rakuten.co.jp"]'
+        : host.endsWith("zenmarket.jp")
+          ? '#productsContainer a.product-item.product-link,#productsContainer a[href*="rakutenproduct.aspx"],#productsContainer a[href*="auction.aspx"],#productsContainer a[href*="rakumaproduct.aspx"],#productsContainer a[href*="item.rakuten.co.jp"]'
+          : "";
+  const base = {
     url,
     gotoOptions: { waitUntil: "networkidle2", timeout: 30_000 },
-    ...(depop
-      ? { waitForSelector: { selector: 'a[href*="/products/"]', visible: true, timeout: 20_000 } }
-      : { waitForTimeout: 5_000 }),
     userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36",
     rejectResourceTypes: ["font", "media"],
   };
+  // Superbuy's 2026 search source is a prerender shell. Its useful product
+  // state appears only after client-side requests, and Xianyu cards are not
+  // guaranteed to expose one stable selector. A bounded settle delay is more
+  // reliable than timing out while waiting for a guessed class name.
+  if (host.endsWith("superbuy.com")) return { ...base, waitForTimeout: 9_000 };
+  return {
+    ...base,
+    ...(selector
+      ? { waitForSelector: { selector, visible: true, timeout: 22_000 } }
+      : { waitForTimeout: 6_000 }),
+  };
+}
+
+function browserFallbackLoadOptions(url: string) {
+  const options = browserLoadOptions(url) as Record<string, unknown>;
+  const { waitForSelector: _waitForSelector, ...rest } = options;
+  return { ...rest, waitForTimeout: 10_000 };
+}
+
+async function browserQuickAction(action: "content" | "links", url: string) {
+  const browser = await browserRunBinding();
+  if (!browser) return undefined;
+  const primaryOptions = {
+    ...browserLoadOptions(url),
+    ...(action === "links" ? { excludeExternalLinks: false } : {}),
+  };
+  const fallbackOptions = {
+    ...browserFallbackLoadOptions(url),
+    ...(action === "links" ? { excludeExternalLinks: false } : {}),
+  };
+  try {
+    return action === "content"
+      ? await browser.quickAction("content", primaryOptions)
+      : await browser.quickAction("links", primaryOptions);
+  } catch {
+    // ZenMarket and Rakuten can finish loading even when a product selector is
+    // renamed or the query returns zero cards. Retry once after a fixed settle
+    // delay so source markup and links can still be inspected.
+    return action === "content"
+      ? browser.quickAction("content", fallbackOptions)
+      : browser.quickAction("links", fallbackOptions);
+  }
 }
 
 async function fetchRenderedText(url: string) {
-  const browser = browserRunBinding();
-  if (!browser) return "";
-  const response = await browser.quickAction("content", browserLoadOptions(url));
+  const response = await browserQuickAction("content", url);
+  if (!response) return "";
   if (!response.ok) throw new Error(`Browser Run content HTTP ${response.status}`);
   return (await response.text()).slice(0, MAX_HTML);
+}
+
+async function fetchRenderedLinks(url: string) {
+  const response = await browserQuickAction("links", url);
+  if (!response) return [] as string[];
+  if (!response.ok) throw new Error(`Browser Run links HTTP ${response.status}`);
+  try {
+    return [...new Set(renderedLinkValues(await response.json()))];
+  } catch {
+    return [] as string[];
+  }
 }
 
 function renderedLinkValues(value: unknown): string[] {
@@ -419,21 +625,6 @@ function renderedLinkValues(value: unknown): string[] {
   const record = value as Record<string, unknown>;
   return [record.href, record.url, record.link, record.result, record.results]
     .flatMap(renderedLinkValues);
-}
-
-async function fetchRenderedLinks(url: string) {
-  const browser = browserRunBinding();
-  if (!browser) return [] as string[];
-  const response = await browser.quickAction("links", {
-    ...browserLoadOptions(url),
-    excludeExternalLinks: false,
-  });
-  if (!response.ok) throw new Error(`Browser Run links HTTP ${response.status}`);
-  try {
-    return [...new Set(renderedLinkValues(await response.json()))];
-  } catch {
-    return [] as string[];
-  }
 }
 
 function renderedLinksToItems(links: string[], marketplace: Marketplace, sourceUrl: string) {
@@ -907,7 +1098,7 @@ function discoveryQueries(marketplace: Marketplace, query: string, mode: "active
   if (marketplace === "Rakuten") {
     return [
       `site:zenmarket.jp/en/rakutenproduct.aspx ${query}`,
-      `site:zenmarket.jp/en/rakuten.aspx ${query}`,
+      `site:zenmarket.jp/en/search.aspx ${query}`,
       `site:zenmarket.jp "${query}" Rakuten`,
       `site:item.rakuten.co.jp ${query}`,
     ];
@@ -944,21 +1135,25 @@ async function browserRenderedItems(
   marketplace: Marketplace,
   directUrls: string[],
 ): Promise<{ batches: BrowserRenderedBatch[]; successful: number; failed: number }> {
-  if (!browserRunBinding() || !["Depop", "Goofish"].includes(marketplace)) {
+  const browser = await browserRunBinding();
+  const zenMarketBacked = ZENMARKET_MARKETS.includes(marketplace as typeof ZENMARKET_MARKETS[number]);
+  if (!browser || !["Depop", "Goofish", ...ZENMARKET_MARKETS].includes(marketplace as never)) {
     return { batches: [], successful: 0, failed: 0 };
   }
+  const execute = async () => {
   const batches: BrowserRenderedBatch[] = [];
   let successful = 0;
   let failed = 0;
   // Browser time is finite, so render official routes sequentially and stop as
   // soon as a page yields canonical products. Goofish gets a links-only second
   // pass because its result cards may be painted without useful outer HTML.
-  for (const directUrl of directUrls.slice(0, marketplace === "Depop" ? 2 : 3)) {
+  const renderLimit = marketplace === "Depop" ? 2 : zenMarketBacked ? 3 : 4;
+  for (const directUrl of directUrls.slice(0, renderLimit)) {
     try {
       const html = await fetchRenderedText(directUrl);
       let items = directItems(html, marketplace, directUrl);
       successful += 1;
-      if (!items.length && marketplace === "Goofish") {
+      if (!items.length && (marketplace === "Goofish" || zenMarketBacked)) {
         try {
           const links = await fetchRenderedLinks(directUrl);
           items = renderedLinksToItems(links, marketplace, directUrl);
@@ -974,37 +1169,83 @@ async function browserRenderedItems(
     }
   }
   return { batches, successful, failed };
+  };
+  return zenMarketBacked ? withZenMarketBrowserSlot(execute) : execute();
 }
 
 async function discover(marketplace: Marketplace, query: string, page: number, mode: "active" | "sold") {
   const directUrls = sourceSearchCandidates(marketplace, query, mode, page);
-  const directRequests = directUrls.map(async (directUrl) =>
+  const directRequest = async (directUrl: string) =>
     directItems(
       await fetchText(directUrl, "text/html,application/xhtml+xml"),
       marketplace,
       directUrl,
-    ),
-  );
+    );
   const mercariApiRequest = marketplace === "Mercari Japan"
     ? mercariApiItems(query, mode, page)
     : Promise.resolve({ items: [] as DiscoveredItem[], total: 0, hasMore: false });
 
-  const [mercariApi, directSettled] = await Promise.all([
-    Promise.allSettled([mercariApiRequest]).then((values) => values[0]),
-    Promise.allSettled(directRequests),
-  ]);
   const items = new Map<string, DiscoveredItem>();
   const mergeItems = (values: DiscoveredItem[]) => {
     for (const item of values) items.set(item.url, mergeDiscovered(items.get(item.url), item));
   };
-  if (mercariApi.status === "fulfilled") mergeItems(mercariApi.value.items);
-  for (const batch of directSettled) if (batch.status === "fulfilled") mergeItems(batch.value);
-
+  const directSettled: PromiseSettledResult<DiscoveredItem[]>[] = [];
   let browserBatches = { batches: [] as BrowserRenderedBatch[], successful: 0, failed: 0 };
-  if (items.size === 0) {
-    browserBatches = await browserRenderedItems(marketplace, directUrls);
-    for (const batch of browserBatches.batches) mergeItems(batch.items);
+  const mergeBrowserBatches = (incoming: typeof browserBatches) => {
+    browserBatches = {
+      batches: [...browserBatches.batches, ...incoming.batches],
+      successful: browserBatches.successful + incoming.successful,
+      failed: browserBatches.failed + incoming.failed,
+    };
+    for (const batch of incoming.batches) mergeItems(batch.items);
+  };
+  const fetchStatic = async (urls: string[], stopOnFirstListing = false) => {
+    if (!stopOnFirstListing) {
+      const batches = await Promise.allSettled(urls.map(directRequest));
+      directSettled.push(...batches);
+      for (const batch of batches) if (batch.status === "fulfilled") mergeItems(batch.value);
+      return;
+    }
+    for (const url of urls) {
+      const [batch] = await Promise.allSettled([directRequest(url)]);
+      directSettled.push(batch);
+      if (batch.status === "fulfilled") mergeItems(batch.value);
+      if (items.size) break;
+    }
+  };
+
+  const preferredUrls = marketplace === "Goofish"
+    ? directUrls.filter((value) => {
+        try { return new URL(value).hostname.toLowerCase().endsWith("superbuy.com"); }
+        catch { return false; }
+      })
+    : ZENMARKET_MARKETS.includes(marketplace as typeof ZENMARKET_MARKETS[number])
+      ? directUrls.filter((value) => {
+          try { return new URL(value).hostname.toLowerCase().endsWith("zenmarket.jp"); }
+          catch { return false; }
+        })
+      : [];
+  const fallbackUrls = preferredUrls.length
+    ? directUrls.filter((value) => !preferredUrls.includes(value))
+    : directUrls;
+
+  if (preferredUrls.length) {
+    // Superbuy and all three ZenMarket storefronts return JavaScript shells on
+    // their search routes. Give each proxy adapter both a static parse and a
+    // fully rendered attempt before its original-market fallback can win.
+    await fetchStatic(preferredUrls, true);
+    if (items.size === 0) mergeBrowserBatches(await browserRenderedItems(marketplace, preferredUrls));
+    if (items.size === 0 && fallbackUrls.length) await fetchStatic(fallbackUrls);
+    if (items.size === 0 && fallbackUrls.length) {
+      mergeBrowserBatches(await browserRenderedItems(marketplace, fallbackUrls));
+    }
+  } else {
+    await fetchStatic(fallbackUrls);
+    if (items.size === 0) mergeBrowserBatches(await browserRenderedItems(marketplace, fallbackUrls));
   }
+
+  const [mercariApi] = await Promise.allSettled([mercariApiRequest]);
+  if (mercariApi.status === "fulfilled") mergeItems(mercariApi.value.items);
 
   const variants = discoveryQueries(marketplace, query, mode);
   const indexedRequests = items.size
@@ -1022,6 +1263,7 @@ async function discover(marketplace: Marketplace, query: string, page: number, m
   for (const batch of indexedSettled) if (batch.status === "fulfilled") mergeItems(batch.value);
 
   const allBatches = [...directSettled, ...indexedSettled];
+  const browserBindingAvailable = Boolean(await browserRunBinding());
   return {
     items: [...items.values()].slice(0, 36),
     directUrls,
@@ -1033,7 +1275,7 @@ async function discover(marketplace: Marketplace, query: string, page: number, m
     indexedSearchBatches: indexedRequests.length,
     browserRenderedBatches: browserBatches.successful,
     browserRenderedUrls: browserBatches.batches.map((batch) => batch.url),
-    browserBindingAvailable: Boolean(browserRunBinding()),
+    browserBindingAvailable,
     hasMoreHint: (mercariApi.status === "fulfilled" && mercariApi.value.hasMore)
       || items.size >= 24,
   };
@@ -1098,10 +1340,531 @@ function depopSearchItems(html: string, baseUrl: string) {
   return [...found.values()];
 }
 
+
+function attribute(tag: string, name: string) {
+  const match = tag.match(new RegExp(`\\b${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`, "i"));
+  return decodeEntities(match?.[1] || match?.[2] || "");
+}
+
+function nearestProductBlock(html: string, index: number) {
+  // Product grids normally wrap the image link, title and price in an li or
+  // article. Prefer those outer cards over a nested image div so fields from
+  // neighboring products cannot bleed into one another.
+  for (const tag of ["li", "article", "section", "div"]) {
+    const start = html.lastIndexOf(`<${tag}`, index);
+    if (start < 0 || index - start >= 8_000) continue;
+    const close = html.indexOf(`</${tag}>`, index);
+    if (close >= 0 && close - index < 12_000) return html.slice(start, close + tag.length + 3);
+  }
+  return html.slice(Math.max(0, index - 1_600), Math.min(html.length, index + 4_000));
+}
+
+/** Parse Rakuten's product-level JSON-LD without allowing fields from
+ * neighboring cards to bleed together. The current Rakuten results page emits
+ * an ItemList whose ListItem.item Product contains the canonical URL, title,
+ * image and Offer price as one record. */
+function rakutenJsonLdItems(html: string, baseUrl: string) {
+  const found = new Map<string, DiscoveredItem>();
+
+  const offerPrice = (value: unknown): { amount: number; currency: string } => {
+    if (Array.isArray(value)) {
+      for (const child of value) {
+        const parsed = offerPrice(child);
+        if (parsed.amount) return parsed;
+      }
+      return { amount: 0, currency: "" };
+    }
+    const record = objectRecord(value);
+    if (!record) return money(value);
+    const direct = money(record);
+    const nested = [record.priceSpecification, record.price_specification, record.offers]
+      .map(offerPrice).find((entry) => entry.amount);
+    return {
+      amount: direct.amount || nested?.amount || recordNumber(record, ["lowPrice", "highPrice"]),
+      currency: direct.currency || nested?.currency
+        || recordText(record, ["priceCurrency", "currency", "currencyCode"]),
+    };
+  };
+
+  const addRecord = (record: Record<string, unknown>) => {
+    const nestedItem = objectRecord(record.item);
+    const product = nestedItem || record;
+    const type = recordText(product, ["@type", "type"]);
+    const explicitUrl = recordText(product, ["url", "itemUrl", "productUrl", "offersUrl"])
+      || recordText(record, ["url"]);
+    if (!explicitUrl || (!/product/i.test(type) && !/item\.rakuten\.co\.jp/i.test(explicitUrl))) return;
+    const url = cleanUrl(absolute(explicitUrl, baseUrl), "Rakuten");
+    if (!url) return;
+
+    const title = recordText(product, ["name", "title", "headline"])
+      || recordText(record, ["name", "title"])
+      || "Rakuten listing";
+    const offers = recordValue(product, ["offers", "offer", "priceSpecification", "price_specification"]);
+    const price = offerPrice(offers);
+    const image = imageFromValue(recordValue(product, [
+      "image", "images", "imageUrl", "image_url", "thumbnail", "thumbnailUrl",
+    ]), baseUrl);
+    const condition = recordText(product, ["itemCondition", "condition"]);
+    const brand = nestedText(product.brand, "name") || text(product.brand);
+    const description = [brand, condition, recordText(product, ["description"])].filter(Boolean).join(" · ");
+    const item: DiscoveredItem = {
+      url,
+      title: title.slice(0, 240),
+      description: description.slice(0, 650),
+      ...(price.amount ? { publicPrice: price.amount, publicCurrency: price.currency || "JPY" } : {}),
+      ...(image ? { image } : {}),
+    };
+    found.set(url, mergeDiscovered(found.get(url), item));
+  };
+
+  for (const script of html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)) {
+    const attributes = script[1] || "";
+    const body = script[2] || "";
+    if (!/application\/ld\+json/i.test(attributes)
+      && !/(?:itemListElement|item\.rakuten\.co\.jp|schema\.org)/i.test(body)) continue;
+    for (const payload of jsonPayloadsFromScript(body)) walk(payload, addRecord);
+  }
+
+  // Rakuten also places the ItemList JSON directly inside its search-results
+  // component instead of a script element. Extract balanced schema.org objects
+  // from the full page so rendered HTML keeps each product image paired with
+  // its own title, offer and canonical URL.
+  const extractInline = (source: string) => {
+    const seenStarts = new Set<number>();
+    for (const marker of source.matchAll(/\{\s*"@(?:context|type)"\s*:\s*"(?:https?:\/\/schema\.org\/?|ItemList)"/gi)) {
+      const start = marker.index ?? -1;
+      if (start < 0 || seenStarts.has(start)) continue;
+      seenStarts.add(start);
+      let depth = 0;
+      let quoted = false;
+      let escaped = false;
+      for (let index = start; index < source.length; index += 1) {
+        const char = source[index];
+        if (quoted) {
+          if (escaped) escaped = false;
+          else if (char === "\\") escaped = true;
+          else if (char === '"') quoted = false;
+          continue;
+        }
+        if (char === '"') { quoted = true; continue; }
+        if (char === "{") depth += 1;
+        if (char === "}") {
+          depth -= 1;
+          if (depth === 0) {
+            const candidate = source.slice(start, index + 1);
+            try { walk(JSON.parse(candidate), addRecord); } catch { /* malformed inline state */ }
+            break;
+          }
+        }
+      }
+    }
+  };
+  const normalizedHtml = decodeEntities(html).replaceAll("\\u002F", "/").replaceAll("\\/", "/");
+  extractInline(normalizedHtml);
+  if (/\\"@(?:context|type)\\"/.test(normalizedHtml)) {
+    extractInline(normalizedHtml.replaceAll('\\"', '"'));
+  }
+  return [...found.values()];
+}
+
+/** Parse the actual server-rendered cards on search.rakuten.co.jp. */
+function rakutenSearchItems(html: string, baseUrl: string) {
+  const found = new Map<string, DiscoveredItem>();
+  for (const match of html.matchAll(/<a\b[^>]*href\s*=\s*(?:"([^"]*item\.rakuten\.co\.jp[^"]*)"|'([^']*item\.rakuten\.co\.jp[^']*)')[^>]*>/gi)) {
+    const tag = match[0];
+    const url = cleanUrl(absolute(match[1] || match[2] || "", baseUrl), "Rakuten");
+    if (!url) continue;
+    const block = nearestProductBlock(html, match.index ?? 0);
+    const imageTag = block.match(/<img\b[^>]*>/i)?.[0] || "";
+    const anchorClose = html.indexOf("</a>", match.index ?? 0);
+    const anchorBody = anchorClose >= 0 && anchorClose - (match.index ?? 0) < 5_000
+      ? html.slice((match.index ?? 0) + tag.length, anchorClose)
+      : "";
+    const title = text(
+      attribute(tag, "title") || attribute(tag, "aria-label")
+      || attribute(imageTag, "alt") || anchorBody || block.match(/<h[2-4]\b[^>]*>([\s\S]*?)<\/h[2-4]>/i)?.[1]
+      || "Rakuten listing",
+    ).slice(0, 220);
+    const price = priceFromPublicText(text(block));
+    const image = absolute(
+      attribute(imageTag, "src") || attribute(imageTag, "data-src")
+      || attribute(imageTag, "data-original") || attribute(imageTag, "data-lazy-src"),
+      baseUrl,
+    );
+    const condition = /(?:中古|used)/i.test(text(block)) ? "Used" : /(?:新品|new)/i.test(text(block)) ? "New" : "";
+    const description = [condition, text(block).slice(0, 520)].filter(Boolean).join(" · ");
+    const item: DiscoveredItem = {
+      url, title, description,
+      ...(price.amount ? { publicPrice: price.amount, publicCurrency: price.currency || "JPY" } : {}),
+      ...(image ? { image } : {}),
+    };
+    found.set(url, mergeDiscovered(found.get(url), item));
+  }
+  return [...found.values()];
+}
+
+/** Parse fully rendered ZenMarket doT cards after their AJAX catalog loads. */
+function zenMarketCardItems(html: string, marketplace: Marketplace, baseUrl: string) {
+  const found = new Map<string, DiscoveredItem>();
+  for (const match of html.matchAll(/<a\b[^>]*>[\s\S]*?<\/a>/gi)) {
+    const block = match[0];
+    const openEnd = block.indexOf(">");
+    if (openEnd < 0) continue;
+    const tag = block.slice(0, openEnd + 1);
+    const className = attribute(tag, "class");
+    if (!/(?:^|\s)product-item(?:\s|$)/i.test(className) || !/(?:^|\s)product-link(?:\s|$)/i.test(className)) continue;
+    const rawHref = attribute(tag, "href");
+    if (!rawHref || /\{\{[?=!]/.test(rawHref)) continue;
+    const url = cleanUrl(absolute(rawHref, baseUrl), marketplace);
+    if (!url) continue;
+    const title = text(
+      block.match(/<h3\b[^>]*class=(?:"[^"]*item-title[^"]*"|'[^']*item-title[^']*')[^>]*>([\s\S]*?)<\/h3>/i)?.[1]
+      || attribute(tag, "title") || attribute(tag, "aria-label")
+      || attribute(block.match(/<img\b[^>]*>/i)?.[0] || "", "alt")
+      || `${marketplace} listing`,
+    );
+    const priceSource = block.match(/<span\b[^>]*class=(?:"[^"]*current-price[^"]*"|'[^']*current-price[^']*')[^>]*>([\s\S]*?)<\/span>/i)?.[1]
+      || block.match(/<div\b[^>]*class=(?:"[^"]*price[^"]*"|'[^']*price[^']*')[^>]*>([\s\S]*?)<\/div>/i)?.[1]
+      || block;
+    const price = priceFromPublicText(text(priceSource));
+    const imageTag = block.match(/<img\b[^>]*>/i)?.[0] || "";
+    const image = absolute(
+      attribute(imageTag, "src") || attribute(imageTag, "data-src")
+      || attribute(imageTag, "data-original") || attribute(imageTag, "data-lazy-src"),
+      baseUrl,
+    );
+    const storeName = text(block.match(/product-badge-store[^>]*>([\s\S]*?)<\/div>/i)?.[1]);
+    const condition = text(block.match(/product-badge-condition-[^>]*>([\s\S]*?)<\/div>/i)?.[1]);
+    const description = [storeName, condition, text(block).slice(0, 600)].filter(Boolean).join(" · ");
+    found.set(url, mergeDiscovered(found.get(url), {
+      url, title, description,
+      ...(price.amount ? { publicPrice: price.amount, publicCurrency: price.currency || "JPY" } : {}),
+      ...(image ? { image } : {}),
+    }));
+  }
+  return [...found.values()];
+}
+
+/** Parse ZenMarket's JSON/AJAX result objects when cards are serialized in
+ * scripts or returned by a browser-rendered search response. */
+function zenMarketStructuredItems(html: string, marketplace: Marketplace, baseUrl: string) {
+  const found = new Map<string, DiscoveredItem>();
+  const addRecord = (record: Record<string, unknown>) => {
+    const serialized = JSON.stringify(record);
+    const storeId = recordText(record, ["storeId", "store_id", "shopId", "shop_id"]);
+    const storeName = recordText(record, ["storeName", "store_name", "store", "marketplace", "source"]);
+    const explicitUrl = recordText(record, [
+      "url", "itemUrl", "item_url", "productUrl", "product_url", "detailUrl", "detail_url",
+      "goodsUrl", "goods_url", "link", "href", "targetUrl", "target_url",
+    ]);
+    const code = recordText(record, [
+      "itemCode", "item_code", "productCode", "product_code", "code", "watchCode",
+      "watch_code", "auctionId", "auction_id", "productId", "product_id", "id",
+    ]);
+    const rakutenMarker = marketplace === "Rakuten" && (
+      storeId === "0" || /\brakuten\b/i.test(storeName)
+      || /(?:rakutenproduct\.aspx|item\.rakuten\.co\.jp)/i.test(explicitUrl)
+      || /(?:\"storeId\"\s*:\s*0|\"storeName\"\s*:\s*\"Rakuten\")/i.test(serialized)
+    );
+    const auctionMarker = marketplace === "JDirectItems Auction" && (
+      storeId === "28" || /(?:auction|jdirectitems|yahoo)/i.test(`${storeName} ${explicitUrl}`)
+    );
+    const rakumaMarker = marketplace === "Rakuten Rakuma" && (
+      storeId === "25" || /(?:rakuma|fril)/i.test(`${storeName} ${explicitUrl}`)
+    );
+    if (!rakutenMarker && !auctionMarker && !rakumaMarker) return;
+
+    let rawUrl = explicitUrl;
+    if (!rawUrl && code) {
+      if (marketplace === "Rakuten") {
+        rawUrl = `https://zenmarket.jp/en/rakutenproduct.aspx?itemCode=${encodeURIComponent(code)}`;
+      } else if (marketplace === "JDirectItems Auction") {
+        rawUrl = `https://zenmarket.jp/en/auction.aspx?itemCode=${encodeURIComponent(code)}`;
+      } else if (marketplace === "Rakuten Rakuma") {
+        rawUrl = `https://zenmarket.jp/en/rakumaproduct.aspx?itemCode=${encodeURIComponent(code)}`;
+      }
+    }
+    const url = cleanUrl(absolute(rawUrl, baseUrl), marketplace);
+    if (!url) return;
+
+    const title = recordText(record, [
+      "title", "itemTitle", "item_title", "productTitle", "product_title", "name",
+      "productName", "product_name", "goodsName", "goods_name", "watchTitle", "watch_title",
+    ]) || `${marketplace} listing`;
+    const nestedPrice = [
+      money(recordValue(record, ["price", "currentPrice", "current_price", "priceInfo", "price_info"])),
+      money(recordValue(record, ["buyoutPrice", "buyout_price", "watchPrice", "watch_price"])),
+    ].find((entry) => entry.amount);
+    const explicitAmount = nestedPrice?.amount || recordNumber(record, [
+      "price", "currentPrice", "current_price", "priceValue", "price_value", "amount",
+      "watchPrice", "watch_price", "buyoutPrice", "buyout_price",
+    ]);
+    const explicitCurrency = recordText(record, [
+      "currency", "currencyCode", "currency_code", "priceCurrency", "price_currency",
+    ]) || nestedPrice?.currency;
+    const publicPrice = explicitAmount
+      ? { amount: explicitAmount, currency: explicitCurrency || "JPY" }
+      : priceFromPublicText(serialized);
+    const image = imageFromValue(recordValue(record, [
+      "image", "imageUrl", "image_url", "itemImage", "item_image", "productImage",
+      "product_image", "thumbnail", "thumbnailUrl", "thumbnail_url", "images",
+    ]), baseUrl);
+    const condition = recordText(record, ["condition", "itemCondition", "item_condition"]);
+    const description = [storeName, condition, text(serialized).slice(0, 520)].filter(Boolean).join(" · ");
+    found.set(url, mergeDiscovered(found.get(url), {
+      url,
+      title,
+      description,
+      ...(publicPrice.amount ? { publicPrice: publicPrice.amount, publicCurrency: publicPrice.currency || "JPY" } : {}),
+      ...(image ? { image } : {}),
+    }));
+  };
+
+  const trimmed = decodeEntities(html).trim();
+  if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+    try { walk(JSON.parse(trimmed), addRecord); } catch { /* not a JSON response */ }
+  }
+  for (const script of html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)) {
+    for (const payload of jsonPayloadsFromScript(script[1])) walk(payload, addRecord);
+  }
+  return [...found.values()];
+}
+
+function jsonPayloadsFromScript(source: string) {
+  const payloads: unknown[] = [];
+  const seen = new Set<string>();
+  const normalized = decodeEntities(source)
+    .replaceAll("\\u002F", "/")
+    .replaceAll("\\/", "/")
+    .trim();
+  const candidates: string[] = [];
+  const addCandidate = (value: string) => {
+    const clean = value.trim().replace(/;\s*$/, "");
+    if (clean.length < 2 || clean.length > MAX_HTML || seen.has(clean)) return;
+    seen.add(clean);
+    candidates.push(clean);
+  };
+  addCandidate(normalized);
+  addCandidate(normalized.replace(/^[\s\S]*?=\s*(?=[{[])/, ""));
+
+  // Extract balanced JSON objects/arrays from assignment scripts, React flight
+  // payloads, and serialized bootstrap state without executing page JavaScript.
+  for (let start = 0; start < normalized.length && candidates.length < 80; start += 1) {
+    const opener = normalized[start];
+    if (opener !== "{" && opener !== "[") continue;
+    const stack = [opener];
+    let quote = "";
+    let escaped = false;
+    for (let index = start + 1; index < normalized.length; index += 1) {
+      const char = normalized[index];
+      if (quote) {
+        if (escaped) escaped = false;
+        else if (char === "\\") escaped = true;
+        else if (char === quote) quote = "";
+        continue;
+      }
+      if (char === '"' || char === "'") { quote = char; continue; }
+      if (char === "{" || char === "[") stack.push(char);
+      if (char === "}" || char === "]") {
+        const expected = char === "}" ? "{" : "[";
+        if (stack.at(-1) !== expected) break;
+        stack.pop();
+        if (!stack.length) {
+          addCandidate(normalized.slice(start, index + 1));
+          start = index;
+          break;
+        }
+      }
+    }
+  }
+
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(candidate);
+      payloads.push(parsed);
+      // Next/React flight data frequently wraps useful JSON in strings nested
+      // inside an outer array. Recursively unwrap only product-shaped strings.
+      const unwrapStrings = (value: unknown) => {
+        if (typeof value === "string") {
+          if (/(?:item|goods|product|xianyu|goofish|闲鱼)/i.test(value)) {
+            for (const nested of jsonPayloadsFromScript(value).slice(0, 20)) payloads.push(nested);
+          }
+          return;
+        }
+        if (Array.isArray(value)) { for (const child of value) unwrapStrings(child); return; }
+        if (!value || typeof value !== "object") return;
+        for (const child of Object.values(value as Record<string, unknown>)) unwrapStrings(child);
+      };
+      unwrapStrings(parsed);
+    } catch { /* executable JavaScript or a non-JSON balanced block */ }
+  }
+  return payloads;
+}
+
+function goofishStructuredItems(html: string, baseUrl: string) {
+  const found = new Map<string, DiscoveredItem>();
+  let baseIsSuperbuy = false;
+  let baseIsXianyuSearch = false;
+  try {
+    const base = new URL(baseUrl);
+    baseIsSuperbuy = base.hostname.toLowerCase().endsWith("superbuy.com");
+    const platform = `${base.searchParams.get("platform") || ""} ${base.searchParams.get("source") || ""}`;
+    baseIsXianyuSearch = baseIsSuperbuy && (
+      base.pathname.toLowerCase().includes("/fleamarket/")
+      || /(?:^|\s)(?:xy|xianyu|goofish)(?:\s|$)/i.test(platform)
+    );
+  } catch { /* invalid base */ }
+  const addRecord = (record: Record<string, unknown>) => {
+    const serialized = JSON.stringify(record);
+    const sourceMarker = [
+      text(record.platform), text(record.platformCode), text(record.platform_code),
+      text(record.source), text(record.sourcePlatform), text(record.source_platform),
+      text(record.site), text(record.marketplace), serialized,
+    ].join(" ");
+    const xianyuRecord = baseIsXianyuSearch
+      || /(?:\bxy\b|xianyu|goofish|闲鱼|2\.taobao\.com)/i.test(sourceMarker);
+    const id = text(record.itemId) || text(record.item_id) || text(record.itemIdStr)
+      || text(record.item_id_str) || text(record.productId) || text(record.product_id)
+      || text(record.goodsId) || text(record.goods_id) || text(record.numIid)
+      || text(record.num_iid) || text(record.offerId) || text(record.offer_id)
+      || text(record.auctionId) || text(record.auction_id) || text(record.goodsNo)
+      || text(record.goods_no) || text(record.itemCode) || text(record.item_code)
+      || recordText(record, ["itemId", "itemIdStr", "productId", "goodsId", "numIid", "offerId", "auctionId", "goodsNo", "itemCode"]);
+    const explicitUrl = text(record.url) || text(record.itemUrl) || text(record.item_url)
+      || text(record.detailUrl) || text(record.detail_url) || text(record.goodsUrl)
+      || text(record.goods_url) || text(record.productUrl) || text(record.product_url)
+      || text(record.originUrl) || text(record.origin_url) || text(record.sourceUrl)
+      || text(record.source_url) || text(record.originalUrl) || text(record.original_url)
+      || text(record.goodsLink) || text(record.goods_link) || text(record.jumpUrl)
+      || text(record.jump_url) || text(record.targetUrl) || text(record.target_url)
+      || text(record.thirdPartyUrl) || text(record.third_party_url) || text(record.link)
+      || recordText(record, ["url", "itemUrl", "detailUrl", "goodsUrl", "productUrl", "originUrl", "sourceUrl", "originalUrl", "goodsLink", "jumpUrl", "targetUrl", "thirdPartyUrl", "link", "href"]);
+    const rawUrl = explicitUrl
+      || (id && /^\d{6,}$/.test(id) && (!baseIsSuperbuy || xianyuRecord)
+        ? `https://www.goofish.com/item?id=${id}` : "");
+    const url = cleanUrl(absolute(rawUrl, baseUrl), "Goofish");
+    if (!url) return;
+    const title = text(record.itemTitle) || text(record.item_title) || text(record.title)
+      || text(record.name) || text(record.goodsName) || text(record.goods_name)
+      || text(record.productName) || text(record.product_name) || text(record.subject)
+      || text(record.goodsTitle) || text(record.goods_title) || text(record.productTitle)
+      || text(record.product_title) || text(record.itemName) || text(record.item_name)
+      || text(record.shortTitle) || text(record.short_title)
+      || recordText(record, ["itemTitle", "title", "name", "goodsName", "productName", "subject", "goodsTitle", "productTitle", "itemName", "shortTitle"])
+      || "Goofish marketplace listing";
+    const nestedPrice = [
+      money(record.price), money(record.priceInfo), money(record.price_info),
+      money(record.currentPrice), money(record.current_price), money(record.salePrice), money(record.sale_price),
+    ].find((value) => value.amount);
+    const explicitAmount = nestedPrice?.amount || number(record.price) || number(record.currentPrice) || number(record.current_price)
+      || number(record.soldPrice) || number(record.sold_price) || number(record.amount)
+      || number(record.goodsPrice) || number(record.goods_price) || number(record.salePrice)
+      || number(record.sale_price) || number(record.priceValue) || number(record.price_value)
+      || recordNumber(record, ["price", "currentPrice", "soldPrice", "amount", "goodsPrice", "salePrice", "priceValue"]);
+    const explicitCurrency = text(record.currency) || text(record.currencyCode) || text(record.priceCurrency)
+      || text(record.currency_code) || nestedPrice?.currency || text(record.currencySymbol)
+      || recordText(record, ["currency", "currencyCode", "priceCurrency", "currencySymbol"]);
+    const parsedPrice = priceFromPublicText(serialized);
+    const price = explicitAmount
+      ? { amount: explicitAmount, currency: explicitCurrency || parsedPrice.currency || "CNY" }
+      : parsedPrice;
+    const imageMatch = imageFromValue(
+      record.image || record.imageUrl || record.image_url || record.picUrl || record.pic_url
+      || record.goodsImage || record.goods_image || record.mainImage || record.main_image
+      || record.cover || record.pictures || record.images
+      || recordValue(record, ["image", "imageUrl", "picUrl", "goodsImage", "mainImage", "cover", "pictures", "images", "thumbnail"]),
+      baseUrl,
+    ) || serialized.match(/https?:\\?\/\\?\/[^"'\\s]+\.(?:jpe?g|png|webp)(?:\?[^"'\\s]*)?/i)?.[0]
+      ?.replaceAll("\\/", "/") || "";
+    const item: DiscoveredItem = {
+      url, title, description: text(serialized).slice(0, 650),
+      ...(price.amount ? { publicPrice: price.amount, publicCurrency: price.currency || "CNY" } : {}),
+      ...(imageMatch ? { image: imageMatch } : {}),
+    };
+    found.set(url, mergeDiscovered(found.get(url), item));
+  };
+  for (const script of html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)) {
+    for (const payload of jsonPayloadsFromScript(script[1])) walk(payload, addRecord);
+  }
+  // Rendered Superbuy and Goofish payloads can expose IDs in executable state
+  // or data attributes rather than a standalone JSON script.
+  for (const match of html.matchAll(/(?:itemId|item_id|itemIdStr|goodsId|goods_id|numIid|num_iid)["']?\s*[:=]\s*["']?(\d{6,})/gi)) {
+    const context = contextForUrl(html, match.index ?? 0);
+    addRecord({
+      itemId: match[1],
+      platform: /(?:xianyu|goofish|闲鱼|platform["']?\s*[:=]\s*["']?xy)/i.test(context) ? "xy" : "",
+      itemTitle: text(context.match(/(?:itemTitle|item_title|goodsName|goods_name|title|name)["']?\s*[:=]\s*["']([^"']{3,220})/i)?.[1]),
+      price: context.match(/(?:price|soldPrice|currentPrice|goodsPrice|salePrice)["']?\s*[:=]\s*["']?([\d,.]+)/i)?.[1],
+      currency: /(?:CNY|RMB|CN¥|CN￥|元)/i.test(context) ? "CNY" : "",
+    });
+  }
+  for (const match of html.matchAll(/data-(?:item-id|itemid|goods-id|product-id|num-iid)\s*=\s*(?:"(\d{6,})"|'(\d{6,})')/gi)) {
+    const context = nearestProductBlock(html, match.index ?? 0);
+    const xianyuContext = baseIsXianyuSearch || /(?:xianyu|goofish|闲鱼|2\.taobao\.com|platform\s*[=:]\s*["']?xy)/i.test(context);
+    // A regular Superbuy catalog card can use the same numeric data attributes
+    // for Taobao/1688 products. Do not relabel those as Goofish listings.
+    if (baseIsSuperbuy && !xianyuContext) continue;
+    const id = match[1] || match[2];
+    const title = text(
+      context.match(/(?:aria-label|title|alt)\s*=\s*(?:"([^"]{3,220})"|'([^']{3,220})')/i)?.[1]
+      || context.match(/(?:aria-label|title|alt)\s*=\s*(?:"([^"]{3,220})"|'([^']{3,220})')/i)?.[2]
+      || context.match(/>([^<>]{3,220})<\/(?:a|h2|h3|p|span)>/i)?.[1],
+    );
+    const parsed = priceFromPublicText(text(context));
+    const imageTag = context.match(/<img\b[^>]*>/i)?.[0] || "";
+    addRecord({
+      itemId: id,
+      platform: xianyuContext ? "xy" : "",
+      itemTitle: title,
+      price: parsed.amount,
+      currency: parsed.currency || "CNY",
+      imageUrl: attribute(imageTag, "src") || attribute(imageTag, "data-src")
+        || attribute(imageTag, "data-original") || attribute(imageTag, "data-lazy-src"),
+    });
+  }
+  for (const match of html.matchAll(/data-(?:item-url|goods-url|product-url|source-url|origin-url|target-url|href|link|url)\s*=\s*(?:"([^"]+)"|'([^']+)')/gi)) {
+    const rawUrl = decodeEntities(match[1] || match[2] || "").replaceAll("\\/", "/");
+    const context = nearestProductBlock(html, match.index ?? 0);
+    addRecord({
+      url: rawUrl,
+      platform: /(?:xianyu|goofish|闲鱼|2\.taobao\.com|platform\s*[=:]\s*["']?xy)/i.test(context) ? "xy" : "",
+      itemTitle: text(
+        context.match(/(?:aria-label|title|alt)\s*=\s*(?:"([^"]{3,220})"|'([^']{3,220})')/i)?.[1]
+        || context.match(/>([^<>]{3,220})<\/(?:a|h2|h3|p|span)>/i)?.[1],
+      ),
+      price: priceFromPublicText(text(context)).amount,
+      currency: /(?:CNY|RMB|CN¥|CN￥|元)/i.test(context) ? "CNY" : "",
+    });
+  }
+  return [...found.values()];
+}
+
 function directItems(html: string, marketplace: Marketplace, baseUrl = sourceSearch(marketplace, "")) {
   if (marketplace === "Depop") {
     const cards = depopSearchItems(html, baseUrl);
     if (cards.length) return cards;
+  }
+  if (marketplace === "Rakuten") {
+    // Prefer ZenMarket card/state records even when the rendered proxy page also
+    // contains an original Rakuten source link in a footer or detail control.
+    const proxy = zenMarketCardItems(html, marketplace, baseUrl);
+    if (proxy.length) return proxy;
+    const structured = zenMarketStructuredItems(html, marketplace, baseUrl);
+    if (structured.length) return structured;
+    const jsonLd = rakutenJsonLdItems(html, baseUrl);
+    if (jsonLd.length) return jsonLd;
+    const official = rakutenSearchItems(html, baseUrl);
+    if (official.length) return official;
+  }
+  if (marketplace === "Goofish") {
+    const structured = goofishStructuredItems(html, baseUrl);
+    if (structured.length) return structured;
+  }
+  if (["JDirectItems Auction", "Rakuten Rakuma"].includes(marketplace)) {
+    const proxy = zenMarketCardItems(html, marketplace, baseUrl);
+    if (proxy.length) return proxy;
+    const structured = zenMarketStructuredItems(html, marketplace, baseUrl);
+    if (structured.length) return structured;
   }
   const found = new Map<string, DiscoveredItem>();
   const candidates = [
@@ -1269,6 +2032,7 @@ async function hydrate(marketplace: Marketplace, item: DiscoveredItem) {
       return Object.assign(
         {},
         card as Card,
+        { image: (card as Card).image || item.image || absolute(meta(html, ["og:image", "twitter:image"]), item.url) },
         !(card as Card).listedAt ? listingDateFromHtml(html, pageEngagement?.ageDays) : {},
         engagementFields(pageEngagement),
       );
@@ -1295,7 +2059,7 @@ async function hydrate(marketplace: Marketplace, item: DiscoveredItem) {
       condition: price ? "Check listing" : "Price unavailable — open source",
       size: "Unknown",
       articleType: inferApparelType(title, description),
-      image: absolute(meta(html, ["og:image", "twitter:image"]), item.url), url: item.url,
+      image: absolute(meta(html, ["og:image", "twitter:image"]), item.url) || item.image || "", url: item.url,
       description: description.slice(0, 500), importCosts,
       ...(marketplace === "Goofish" ? { proxyUrl: superbuyProxyUrl(item.url) } : {}),
       ...listingDateFromHtml(html, pageEngagement?.ageDays),
@@ -1343,11 +2107,20 @@ export const __marketSourceTest = {
   cleanUrl,
   directItems,
   depopSearchItems,
+  rakutenSearchItems,
+  rakutenJsonLdItems,
+  zenMarketCardItems,
+  zenMarketStructuredItems,
+  goofishStructuredItems,
   searchHtmlItems,
   decodeSearchRedirect,
   publicSearchRequestUrls,
+  superbuySearchUrl,
   superbuyProxyUrl,
   browserRenderedItems,
+  ZENMARKET_MARKETS,
+  ZENMARKET_ADAPTER,
+  withZenMarketBrowserSlot,
   fetchRenderedText,
   fetchRenderedLinks,
   renderedLinksToItems,
@@ -1411,6 +2184,11 @@ export async function GET(request: Request) {
           ].filter(Boolean).join(", ")}.`
         : `No public ${mode === "sold" ? "sold comparables" : "listing cards"} were available. Open the marketplace results directly.`,
       diagnostics: {
+        sourceProvider: ZENMARKET_MARKETS.includes(marketplace as typeof ZENMARKET_MARKETS[number]) ? "ZenMarket" : marketplace,
+        providerMarket: ZENMARKET_MARKETS.includes(marketplace as typeof ZENMARKET_MARKETS[number])
+          ? ZENMARKET_ADAPTER[marketplace as keyof typeof ZENMARKET_ADAPTER]
+          : undefined,
+        providerBatchSize: Number(url.searchParams.get("providerBatchSize") || 1),
         grailedPageCards: soldFeedCards.length,
         grailedPublicSearch: grailedIndex.length,
         directSearchUrls: discovery.directUrls,

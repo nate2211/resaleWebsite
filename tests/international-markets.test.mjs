@@ -5,16 +5,17 @@ import test from "node:test";
 const root = new URL("../", import.meta.url);
 
 async function sources() {
-  const [analysis, listings, page] = await Promise.all([
+  const [analysis, listings, page, research] = await Promise.all([
     readFile(new URL("app/lib/analysis.ts", root), "utf8"),
     readFile(new URL("app/api/listings/route.ts", root), "utf8"),
     readFile(new URL("app/page.tsx", root), "utf8"),
+    readFile(new URL("app/api/research/route.ts", root), "utf8"),
   ]);
-  return { analysis, listings, page };
+  return { analysis, listings, page, research };
 }
 
 test("keeps international marketplace routes and sold searches distinct", async () => {
-  const { analysis, listings } = await sources();
+  const { analysis, listings, research } = await sources();
 
   for (const marketplace of [
     "Mercari Japan", "JDirectItems Auction", "Rakuten",
@@ -29,18 +30,34 @@ test("keeps international marketplace routes and sold searches distinct", async 
   assert.match(listings, /stores=0/);
   assert.match(listings, /stores=25/);
   assert.match(listings, /www\.goofish\.com\/search\?q=/);
+  assert.match(listings, /variant === "fleamarket" \? "fleamarket" : "search"/);
+  assert.match(listings, /nTag: "Home-search"/);
+  assert.match(listings, /from: "search-input"/);
+  assert.match(listings, /keyword: query/);
   assert.match(listings, /superbuyProxyUrl/);
   assert.match(listings, /landedImportCosts/);
+  for (const source of [analysis, research]) {
+    assert.match(source, /zenmarket\.jp\/en\/search\.aspx\?q=/);
+    assert.match(source, /searchMode=custom&stores=0/);
+    assert.match(source, /www\.superbuy\.com\/en\/page\/search\//);
+    assert.match(source, /nTag: "Home-search"/);
+    assert.match(source, /from: "search-input"/);
+    assert.doesNotMatch(source, /Agent-product-search|_search: "keyword"|position: "5"|platform: "xianyu"/);
+  }
 });
 
 test("uses only the three resale marketplaces by default", async () => {
   const { analysis, page } = await sources();
 
   assert.match(analysis, /RESALE_MARKETPLACES = \["Depop", "Grailed", "Poshmark"\]/);
-  assert.match(analysis, /INTERNATIONAL_MARKETPLACES = \[/);
+  assert.match(analysis, /INTERNATIONAL_MARKETPLACES(?::[^=]+)? = \[/);
   assert.match(page, /useState<Marketplace\[]>\(\[\s*\.\.\.RESALE_MARKETPLACES,\s*\]\)/);
   assert.doesNotMatch(page, /className="market-switcher"/);
   assert.match(page, /RESALE_MARKETPLACES\.map\(\(marketplace\) => renderMarketplaceCard/);
+  assert.match(page, /<h2>AI Search<\/h2>/);
+  assert.match(page, /aria-label="AI Search query"/);
+  const internationalBlock = analysis.match(/INTERNATIONAL_MARKETPLACES(?::[^=]+)? = \[([\s\S]*?)\];/)?.[1] || "";
+  assert.doesNotMatch(internationalBlock, /Goofish/);
 });
 
 test("gates and clears browse international requests", async () => {

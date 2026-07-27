@@ -26,7 +26,7 @@ const questions = [
   },
   {
     question: "Which marketplaces are available?",
-    answer: "Depop, Grailed, and Poshmark are the default sources. International Markets adds Mercari Japan, JDirectItems Auction, Rakuten, Rakuten Rakuma, Bunjang, Goofish, and optional public-web AI Search.",
+    answer: "Depop, Grailed, and Poshmark are the default sources. International Markets adds Mercari Japan, JDirectItems Auction, Rakuten, Rakuten Rakuma, Bunjang, and public-web AI Search.",
   },
   {
     question: "Why are some engagement or listing-date fields unknown?",

@@ -6,11 +6,11 @@
     "node": ">=22.13.0"
   },
   "scripts": {
-    "dev": "vite --mode cloudflare",
-    "dev:windows": "vite --mode cloudflare",
-    "build": "vinext build && node scripts/prepare-static-build.mjs",
+    "dev": "vinext dev -p 5173 -H 0.0.0.0",
+    "dev:windows": "vinext dev -p 5173 -H 0.0.0.0",
+    "build": "node scripts/validate-vinext-entry.mjs && vinext build && node scripts/prepare-static-build.mjs",
     "build:verified": "npm run build && npm run validate:artifact",
-    "build:windows": "vinext build && node scripts/prepare-static-build.mjs",
+    "build:windows": "node scripts/validate-vinext-entry.mjs && vinext build && node scripts/prepare-static-build.mjs",
     "start": "vinext start",
     "start:windows": "vinext start",
     "test": "node --test tests/*.test.mjs",
@@ -24,9 +24,10 @@
     "deploy:static": "npm run build:static && npm run validate:static && npx wrangler@latest deploy",
     "preview:fullstack": "npx @vinext/cloudflare deploy --preview --name audiomasterlab",
     "validate:static": "node scripts/validate-static-build.mjs",
-    "build:static": "vinext build && node scripts/prepare-static-build.mjs --require-static",
-    "dev:local": "vite --mode local",
-    "dev:local:windows": "vite --mode local"
+    "build:static": "node scripts/validate-vinext-entry.mjs && vinext build && node scripts/prepare-static-build.mjs --require-static",
+    "dev:local": "vinext dev -p 5173 -H 0.0.0.0",
+    "dev:local:windows": "vinext dev -p 5173 -H 0.0.0.0",
+    "validate:vinext-entry": "node scripts/validate-vinext-entry.mjs"
   },
   "dependencies": {
     "@huggingface/transformers": "^4.2.0",

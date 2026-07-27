@@ -17,6 +17,8 @@ export type WebReadResult = {
 const MAX_PAGE_BYTES = 1_200_000;
 const MAX_ASSET_BYTES = 180_000;
 const MAX_REDIRECTS = 4;
+const WEB_RETRY_DELAYS_MS = [300, 850] as const;
+const RETRYABLE_WEB_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
 
 function parseIpv4(host: string) {
   const parts = host.split(".");
@@ -78,9 +80,13 @@ async function readLimited(response: Response, maximum = MAX_PAGE_BYTES) {
   return text;
 }
 
-async function fetchSafe(initial: URL, maximum = MAX_PAGE_BYTES) {
-  let current = initial;
-  for (let redirect = 0; redirect <= MAX_REDIRECTS; redirect += 1) {
+async function wait(milliseconds: number) {
+  await new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function fetchCurrent(current: URL) {
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= WEB_RETRY_DELAYS_MS.length; attempt += 1) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 11_000);
     try {
@@ -90,20 +96,41 @@ async function fetchSafe(initial: URL, maximum = MAX_PAGE_BYTES) {
         signal: controller.signal,
         headers: {
           Accept: "text/html,application/xhtml+xml,text/css,application/javascript,text/javascript;q=0.8,*/*;q=0.2",
-          "User-Agent": "ResaleMasterLab/2.0 evidence-reader (+public fashion research; no login or bot bypass)",
+          "User-Agent": "ResaleMasterLab/2.1 evidence-reader (+public fashion research; no login or bot bypass)",
         },
       });
-      if (response.status >= 300 && response.status < 400) {
-        const location = response.headers.get("location");
-        if (!location) return { response, finalUrl: current, body: "" };
-        current = assertPublicHttpsUrl(new URL(location, current).toString());
+      if (RETRYABLE_WEB_STATUS.has(response.status) && attempt < WEB_RETRY_DELAYS_MS.length) {
+        await response.body?.cancel().catch(() => undefined);
+        await wait(WEB_RETRY_DELAYS_MS[attempt]);
         continue;
       }
-      const body = await readLimited(response, maximum);
-      return { response, finalUrl: current, body };
+      return response;
+    } catch (error) {
+      lastError = error;
+      if (attempt >= WEB_RETRY_DELAYS_MS.length) break;
+      await wait(WEB_RETRY_DELAYS_MS[attempt]);
     } finally {
       clearTimeout(timeout);
     }
+  }
+  throw lastError instanceof Error
+    ? lastError
+    : new Error("The public page could not be reached after retrying.");
+}
+
+async function fetchSafe(initial: URL, maximum = MAX_PAGE_BYTES) {
+  let current = initial;
+  for (let redirect = 0; redirect <= MAX_REDIRECTS; redirect += 1) {
+    const response = await fetchCurrent(current);
+    if (response.status >= 300 && response.status < 400) {
+      const location = response.headers.get("location");
+      if (!location) return { response, finalUrl: current, body: "" };
+      await response.body?.cancel().catch(() => undefined);
+      current = assertPublicHttpsUrl(new URL(location, current).toString());
+      continue;
+    }
+    const body = await readLimited(response, maximum);
+    return { response, finalUrl: current, body };
   }
   throw new Error("The page redirected too many times.");
 }

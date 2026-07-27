@@ -42,14 +42,15 @@ test("packages crawlable public pages and Google-facing metadata", async () => {
   assert.match(wrangler, /not_found_handling = "single-page-application"/);
 });
 
-test("keeps AI Search checkbox-only and public-web guarded", async () => {
+test("keeps the AI Search marketplace card public-web guarded", async () => {
   const [page, webRoute, listingRoute, engagement] = await Promise.all([
     source("app/page.tsx"), source("app/api/web-listings/route.ts"),
     source("app/api/listings/route.ts"), source("app/lib/engagement.ts"),
   ]);
 
   assert.match(page, /checked=\{aiWebSearchSelected\}/);
-  assert.match(page, /AI Search <small>/);
+  assert.match(page, /<h2>AI Search<\/h2>/);
+  assert.match(page, /aria-label="AI Search query"/);
   assert.doesNotMatch(page, /AI Search[\s\S]{0,600}placeholder=.*(?:site|domain)/i);
   assert.doesNotMatch(webRoute, /body\.site|site:\$\{host\}|function sourceHost/);
   assert.match(listingRoute, /JDirectItems Auction/);
@@ -68,9 +69,8 @@ test("loads the same ResaleMasterLab styling in development and production", asy
   assert.match(vite, /devSourcemap: true/);
   assert.match(vite, /cssCodeSplit: false/);
   assert.match(vite, /@cloudflare\/vite-plugin/);
-  assert.match(vite, /productionBuild/);
   assert.match(vite, /configPath: "\.\/wrangler\.vinext-build\.toml"/);
-  assert.match(vite, /cloudflareDevelopment/);
+  assert.match(vite, /command === "serve" \|\| command === "build"/);
   assert.match(vite, /\.\.\.\(enableCloudflare/);
   assert.match(packageJson, /prepare-static-build\.mjs/);
   assert.match(prepare, /production client contains no CSS bundle/);

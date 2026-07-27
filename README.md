@@ -1,20 +1,21 @@
 # ResaleMasterLab
 
-ResaleMasterLab searches and compares nine built-in resale sources, with only Depop,
-Grailed, and Poshmark enabled by default. The six international sources are opt-in and
-stay fully inactive while their collapsed sections are closed:
+ResaleMasterLab searches and compares eight selectable resale sources, with only Depop,
+Grailed, and Poshmark enabled by default. Five international marketplace sources are opt-in
+and stay fully inactive while their collapsed sections are closed. A dedicated AI Search card
+occupies the sixth position in the international grid:
 
 - Mercari Japan active listings plus optional `status=sold_out` evidence
 - JDirectItems Auction through the current ZenMarket JDirectItems storefront, its legacy `stores=28` route, and public Yahoo Auctions product-page fallback
-- Rakuten through the current ZenMarket Rakuten storefront, its legacy `stores=0` route, and public Rakuten product-page fallback
+- Rakuten through ZenMarket’s canonical cross-site `search.aspx` route (`searchMode=custom&stores=0`) first, followed by the official server-rendered Rakuten search
 - Rakuten Rakuma through the current ZenMarket Rakuma storefront, its legacy `stores=25` route, and public Rakuma product-page fallback
 - Bunjang through its direct Global Bunjang search
-- Goofish/Xianyu direct public-item discovery with a separate Superbuy buying-agent link and landed-cost estimate
+- AI Search for rendered public secondhand discovery on eBay, Mercari US, public Facebook Marketplace item pages, and other outside resale sites; its Run button also includes Rakuten through ZenMarket in the same batch
 
 Closing **International Markets** deselects those sources, aborts outstanding
 international requests, clears their live cards, and keeps domestic results.
 Deep Inspection runs Grailed sold research independently; expanding
-**International Analysis** launches the six overseas searches and Mercari Japan
+**International Analysis** launches the five overseas marketplace searches and Mercari Japan
 sold inspection, then shows only rows with readable comparable evidence.
 
 When the sitewide AI is enabled, it produces targeted query variations before
@@ -46,11 +47,12 @@ somewhere else.
 The `/api/listings` route uses several public discovery paths for sources whose
 catalog HTML can vary by region or return an access-control page to a Worker:
 
-1. the current marketplace storefront;
-2. the previous ZenMarket cross-site route where applicable;
-3. server-rendered collection/catalog pages;
-4. an on-demand Cloudflare Browser Run render when Depop or Goofish/Superbuy
-   returned zero ordinary cards;
+1. the verified marketplace or buying-agent query route;
+2. static parsing of the preferred proxy source;
+3. an on-demand Cloudflare Browser Run render of ZenMarket when its initial HTML is
+   only a JavaScript shell;
+4. the official Rakuten catalog only after the preferred ZenMarket source produced no
+   canonical product cards;
 5. indexed public product URLs; and
 6. the underlying Yahoo Auctions, Rakuten, or Rakuma public product page.
 
@@ -73,9 +75,7 @@ Example local checks:
 
 Prices are normalized to planning USD values and international sources add an
 estimated proxy/service charge, origin shipping, international shipping,
-currency-conversion reserve, and customs reserve to inbound cost. Current
-defaults use a 500 JPY ZenMarket proxy estimate and a 20 RMB Superbuy used-item
-estimate, with editable/reviewable calculations in the listing inspector.
+currency-conversion reserve, and customs reserve to inbound cost. Current defaults use a 500 JPY ZenMarket proxy estimate, with editable/reviewable calculations in the listing inspector.
 Customs remains an estimate because the actual U.S. rate depends on origin,
 material, HTS classification, carrier, and entry method. The calculator does
 not assume duty-free treatment below $800.
@@ -89,10 +89,10 @@ before calculating resale opportunities.
 ## Main features
 
 - Discover and hydrate real public Depop, Grailed, and Poshmark listing pages.
-- Query each marketplace's real search-results URL first. When Depop or
-  Goofish/Superbuy returns zero cards to ordinary HTTP, render the public results
-  through the configured Cloudflare Browser Run binding before trying indexed
-  public discovery.
+- Query each marketplace's real search-results URL first. When Depop or ZenMarket-backed Rakuten returns only a JavaScript
+  shell to ordinary HTTP, render the public results through the configured
+  Cloudflare Browser Run binding before allowing original-market or indexed
+  discovery to take over.
 - Load up to five result batches per query, deduplicate repeated listings, and append each new unique page beneath the current cards without replacing earlier results.
 - Prevent overlapping scans when the search button is clicked repeatedly.
 - Target and filter clothing by article type, including T-shirts, long-sleeve T-shirts, sweatshirts, hoodies, knitwear, button-ups, polos, tank tops, jackets, jeans, pants, shorts, dresses/skirts, shoes, bags, and accessories.
@@ -102,12 +102,12 @@ before calculating resale opportunities.
   discovery order, AI relevance, brand, or resale deal score.
 - Keep discovery order as the default so later pages append at the bottom; optionally sort by AI relevance, ascending price, descending price, brand, or resale deal score.
 - Start every workspace with only Depop, Grailed, and Poshmark selected.
-- Keep six international marketplace cards under a collapsed opt-in section;
-  closing it deselects those sources, aborts their requests, and clears their
-  live results.
+- Keep five international marketplace cards plus an AI Search card under a collapsed
+  opt-in section; closing it deselects those sources, aborts their requests, and clears
+  their live results.
 - Keep Grailed sold research running inside Deep Inspection even when
   International Analysis is collapsed.
-- Search Mercari Japan sold results plus all six international active sources
+- Search Mercari Japan sold results plus all five international marketplace sources
   only after International Analysis is expanded, and hide empty international
   comparison rows instead of rendering placeholder “No comps” entries.
 - Parse Grailed's rendered sold-result cards directly so the historical
@@ -215,7 +215,7 @@ npm run dev
 1. Optionally enter a persistent instruction in **AI instruction**.
 2. Enter a brand or product in the top search box and press Enter to fetch it.
 3. In **Browse**, select an article type such as T-Shirts, Sweatshirts, or Hoodies, then refine marketplaces, filters, and sort order.
-4. Open **International Markets** only when you want the six overseas sources or optional AI Search.
+4. Open **International Markets** only when you want the five overseas sources or optional AI Search.
 5. Review automatic cross-market matches or load another result batch.
 6. Choose **Import**, paste the URL, and select **Inspect public metadata**.
 7. Verify the imported title, price, size, condition, image, and shipping.
@@ -405,9 +405,40 @@ expansion and reranking improve discovery.
 
 AI Search reads only public HTTPS pages, extracts structured product titles,
 prices, images, descriptions, dates, and source hostnames when exposed, and
-keeps each original listing URL. Closing International Markets aborts and
-clears these requests. It does not execute third-party JavaScript, sign in,
-access private hosts, use nonstandard ports, or bypass bot protection.
+keeps each original listing URL. It explicitly searches eBay item pages,
+Mercari US `/us/item/` pages, and public Facebook Marketplace item pages while
+still excluding the built-in Depop, Grailed, Poshmark, Mercari Japan,
+ZenMarket/Rakuten, Rakuma, Bunjang, and legacy Superbuy adapters. It first tries
+the official public search pages plus static Bing RSS/HTML, DuckDuckGo, and Brave discovery;
+when the full-stack Cloudflare deployment exposes the BROWSER binding, Browser
+Run renders search pages, retrieves rendered links, and reads JavaScript-heavy
+product pages before metadata extraction. The same AI action separately runs
+all selected built-in marketplace adapters and always includes Rakuten through
+ZenMarket in that parallel batch. When JDirectItems Auction, Rakuten, and Rakuma
+are selected together, the client labels them as a three-store ZenMarket batch;
+the server keeps their store identities (`28`, `0`, and `25`) separate and
+limits Browser Run to two simultaneous ZenMarket renders so all three can finish.
+Closing International Markets aborts and
+clears these requests. It never signs in, accesses private hosts, uses
+nonstandard ports, or bypasses CAPTCHA/bot protection.
+
+
+## Development console notes
+
+- `contentscript.js`, `ObjectMultiplex`, `app-init-liveness`, and
+  `background-liveness` messages are injected by a browser extension rather
+  than emitted by this repository. Test localhost in an extension-free browser
+  profile or disable the wallet/provider extension for `localhost` to remove
+  those warnings; increasing this app's listener limit would only hide an
+  external extension problem.
+- The React DevTools download notice is expected in development mode and is not
+  included as an application error in a production build.
+- Manifest, favicon, and install-icon links are origin-relative. Local
+  development therefore requests them from `http://localhost:5173` instead of
+  trying to resolve the production domain.
+- Listing APIs automatically retry transient network/status failures and bound
+  query/page concurrency so a Wi-Fi or interface change is less likely to lose
+  the full scan.
 
 ## Production deployment to Cloudflare
 
@@ -426,7 +457,7 @@ access private hosts, use nonstandard ports, or bypass bot protection.
 7. Add the production property to Google Search Console and submit
    `https://YOUR-DOMAIN/sitemap.xml`.
 
-The included `wrangler.toml` remains the requested assets-only SPA configuration. Full-stack development and production use `wrangler.vinext-build.toml`, which declares the Cloudflare Browser Run binding and a compatibility date supported by the installed runtime. `npm run dev:windows` enables the Cloudflare Vite environment so marketplace API routes and remote browser fallbacks run while `app/globals.css` keeps normal Vite hot reload. `npm run dev:local:windows` is available for frontend-only development without Cloudflare.
+The included `wrangler.toml` remains the requested assets-only SPA configuration. Full-stack development and production use `wrangler.vinext-build.toml`, which declares the Cloudflare Browser Run binding and a compatibility date supported by the installed runtime. `npm run dev:windows` starts `vinext dev` with the Cloudflare Vite environment so marketplace API routes and remote browser fallbacks run while `app/globals.css` keeps normal Vite hot reload. `npm run dev:local:windows` also uses Vinext routing so the root App Router page cannot fall through to Vite's 404 handler.
 
 A normal Vinext App Router build produces Worker, RSC, SSR, client JavaScript, and compiled CSS artifacts rather than a standalone `index.html`. The post-build validator accepts that full-stack output and removes stale `build/` assets. Because the exact root Wrangler file has no `main` Worker entry, `npm run deploy:static` serves only frontend assets; same-origin `/api/*` routes and Browser Run require `npm run deploy`.
 

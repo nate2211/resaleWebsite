@@ -204,13 +204,68 @@ async function readApiJson<T>(response: Response, label: string): Promise<T> {
   return value as T;
 }
 
+const API_RETRY_DELAYS_MS = [350, 900, 1_800] as const;
+const RETRYABLE_API_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
+
+function abortError() {
+  return new DOMException("Request cancelled.", "AbortError");
+}
+
+async function retryDelay(milliseconds: number, signal?: AbortSignal | null) {
+  if (signal?.aborted) throw abortError();
+  await new Promise<void>((resolve, reject) => {
+    const timer = window.setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, milliseconds);
+    const onAbort = () => {
+      window.clearTimeout(timer);
+      reject(abortError());
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
 async function fetchApiJson<T>(
   input: RequestInfo | URL,
   init: RequestInit | undefined,
   label: string,
 ): Promise<T> {
-  const response = await fetch(input, init);
-  return readApiJson<T>(response, label);
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= API_RETRY_DELAYS_MS.length; attempt += 1) {
+    if (init?.signal?.aborted) throw abortError();
+    try {
+      const response = await fetch(input, { ...init, cache: init?.cache ?? "no-store" });
+      if (RETRYABLE_API_STATUS.has(response.status) && attempt < API_RETRY_DELAYS_MS.length) {
+        await response.body?.cancel().catch(() => undefined);
+        await retryDelay(API_RETRY_DELAYS_MS[attempt], init?.signal);
+        continue;
+      }
+      return await readApiJson<T>(response, label);
+    } catch (error) {
+      if (init?.signal?.aborted || (error instanceof DOMException && error.name === "AbortError")) throw error;
+      lastError = error;
+      if (attempt >= API_RETRY_DELAYS_MS.length) break;
+      await retryDelay(API_RETRY_DELAYS_MS[attempt], init?.signal);
+    }
+  }
+  const detail = lastError instanceof Error && lastError.message
+    ? lastError.message
+    : "The browser connection changed while the request was running.";
+  throw new Error(`${label} could not reconnect after retrying. ${detail}`);
+}
+
+async function settleInBatches<T, R>(
+  values: readonly T[],
+  batchSize: number,
+  worker: (value: T) => Promise<R>,
+) {
+  const output: PromiseSettledResult<R>[] = [];
+  for (let index = 0; index < values.length; index += Math.max(1, batchSize)) {
+    const batch = values.slice(index, index + Math.max(1, batchSize));
+    output.push(...await Promise.allSettled(batch.map(worker)));
+  }
+  return output;
 }
 
 function sitePromptRules(prompt: string) {
@@ -378,8 +433,10 @@ function ProductImage({
     <img
       className={`product-image ${className}`}
       src={listing.image || FALLBACK_IMAGE}
-      alt=""
+      alt={listing.title}
       loading="lazy"
+      decoding="async"
+      referrerPolicy="no-referrer"
       onError={(event) => {
         event.currentTarget.src = FALLBACK_IMAGE;
       }}
@@ -2339,7 +2396,7 @@ function ListingInspector({
         >
           <span>
             <strong>International Analysis</strong>
-            <small>Opt in to six international sources and Mercari Japan sold evidence.</small>
+            <small>Opt in to five international sources and Mercari Japan sold evidence.</small>
           </span>
           <b aria-hidden="true">{internationalAnalysisOpen ? "−" : "+"}</b>
         </button>
@@ -3084,6 +3141,9 @@ function BrowseView({
       searches?: string[];
       discoveredCount?: number;
       listings?: Partial<Listing>[];
+      browserBindingAvailable?: boolean;
+      discoveryMode?: string;
+      targetedSecondhandSources?: string[];
     }>("/api/web-listings", {
       method: "POST",
       signal: controller.signal,
@@ -3095,9 +3155,10 @@ function BrowseView({
     }, "AI Search");
     if (value.error) throw new Error(value.error);
     const listings = (value.listings ?? []).map((item) => {
+      const inferred = inferMarketplace(item.url || "");
       const marketplace = MARKETPLACES.includes(item.marketplace as Marketplace)
         ? item.marketplace as Marketplace
-        : inferMarketplace(item.url || "") ?? "Depop";
+        : inferred && MARKETPLACES.includes(inferred) ? inferred : "Depop";
       return apiListing(item, marketplace, searchTerm);
     });
     const sourceCount = new Set(listings.map((listing) => listingSourceName(listing))).size;
@@ -3106,23 +3167,32 @@ function BrowseView({
       searches: value.searches ?? plannedQueries,
       searchTerm,
       message: listings.length
-        ? `${planningNote} Read ${listings.length} priced listing page${listings.length === 1 ? "" : "s"} from ${sourceCount} public source${sourceCount === 1 ? "" : "s"}.`
-        : `Search found ${value.discoveredCount ?? 0} candidate pages, but none exposed a readable product price.`,
+        ? `${planningNote} ${value.discoveryMode || "Public web discovery"} read ${listings.length} priced listing page${listings.length === 1 ? "" : "s"} from ${sourceCount} source${sourceCount === 1 ? "" : "s"}, including targeted secondhand markets when public results were available.`
+        : `Search found ${value.discoveredCount ?? 0} public candidate pages across ${(value.targetedSecondhandSources ?? ["eBay", "Mercari US", "Facebook Marketplace"]).join(", ")} and other outside stores, but none exposed a readable product price.${value.browserBindingAvailable === false ? " Deploy with the remote BROWSER binding to render JavaScript-heavy stores." : ""}`,
     };
   }
 
-  async function loadRealListings(loadMore = false) {
+  async function loadRealListings(loadMore = false, forceAiSearch = false, forceRakuten = false) {
     if (requestInFlight.current) return;
 
     const currentLiveState = liveStateRef.current.length ? liveStateRef.current : liveState;
-    const requestMarkets = selectedMarkets.filter((marketplace): marketplace is Marketplace =>
+    const includeAiSearch = !loadMore && internationalMarketsOpen && (aiWebSearchSelected || forceAiSearch);
+    const requestedSelections = new Set<Marketplace>(selectedMarkets);
+    // Every AI web run is a combined scan: keep every selected source and
+    // always include Rakuten through ZenMarket in the same parallel request batch.
+    if (!loadMore && internationalMarketsOpen && (forceRakuten || includeAiSearch)) {
+      requestedSelections.add("Rakuten");
+    }
+    const requestMarkets = [...requestedSelections].filter((marketplace): marketplace is Marketplace =>
       MARKETPLACES.includes(marketplace) &&
       Boolean(MARKETPLACE_INFO[marketplace]) &&
       (internationalMarketsOpen || !MARKETPLACE_INFO[marketplace].sourcingOnly) &&
       (!loadMore || Boolean(currentLiveState.find((entry) =>
         entry.marketplace === marketplace && entry.hasMore))),
     );
-    const includeAiSearch = !loadMore && internationalMarketsOpen && aiWebSearchSelected;
+    const zenMarketSelections = requestMarkets.filter((marketplace) =>
+      ["JDirectItems Auction", "Rakuten", "Rakuten Rakuma"].includes(marketplace),
+    );
     if (!requestMarkets.length && !includeAiSearch) {
       setMarketSelectionMessage("Select at least one marketplace before loading listings.");
       return;
@@ -3158,27 +3228,37 @@ function BrowseView({
 
     try {
       const selectedResponsesPromise = Promise.all(requestMarkets.map(async (marketplace) => {
+        const literalQuery = query.trim() || (category === "All clothing" ? "clothing" : category);
         const queries = [...new Set(
-          (aiSearchQueries.length ? aiSearchQueries : [query.trim() || category])
+          [literalQuery, ...aiSearchQueries]
             .map((value) => value.trim())
             .filter(Boolean),
         )].slice(0, 4);
 
-        const attempts = await Promise.allSettled(queries.map(async (plannedQuery) => {
+        const attempts = await settleInBatches(queries, 2, async (plannedQuery) => {
           const params = new URLSearchParams({
             marketplace,
             q: plannedQuery,
             category,
             page: String(requestedPage),
           });
+          const zenMarketIndex = zenMarketSelections.indexOf(marketplace);
+          if (zenMarketIndex >= 0) {
+            params.set("provider", "zenmarket");
+            params.set("providerBatchSize", String(zenMarketSelections.length));
+            params.set("providerBatchIndex", String(zenMarketIndex + 1));
+          }
           return fetchApiJson<{
             status?: LiveState["status"];
             message?: string;
             sourceUrl?: string;
             listings?: Partial<Listing>[];
             hasMore?: boolean;
-          }>(`/api/listings?${params}`, { signal: controller.signal }, `${marketplace} search`);
-        }));
+          }>(`/api/listings?${params}`, { signal: controller.signal },
+            zenMarketIndex >= 0
+              ? `${marketplace} via ZenMarket ${zenMarketIndex + 1}/${zenMarketSelections.length}`
+              : `${marketplace} search`);
+        });
 
         const values = attempts.flatMap((attempt) =>
           attempt.status === "fulfilled" ? [attempt.value] : [],
@@ -3592,44 +3672,14 @@ function BrowseView({
         >
           <span>
             <strong>International Markets</strong>
-            <small>Six international sources plus optional AI Search. No requests run while this section is closed.</small>
+            <small>Five international sources plus AI Search. No requests run while this section is closed.</small>
           </span>
           <b aria-hidden="true">{internationalMarketsOpen ? "−" : "+"}</b>
         </button>
         {internationalMarketsOpen && (
           <div className="international-market-body">
-            <div className="ai-search-summary">
-              <span className="large-market-logo ai-search-logo">⌕</span>
-              <div>
-                <strong>AI Search</strong>
-                <p>Searches the wider public web for priced listing pages. It works with your exact query and becomes smarter when the local AI is loaded.</p>
-                <small>{webSearchMessage}</small>
-              </div>
-              <span className={`live-badge ${webSearchState}`}>
-                {webSearchState === "ready" ? `${webSearchListings.length} loaded` : webSearchState}
-              </span>
-            </div>
             <div className="query-options international-query-options">
               <span>Optional market targets</span>
-              <label className="ai-search-target-toggle">
-                  <input
-                    type="checkbox"
-                    checked={aiWebSearchSelected}
-                    onChange={(event) => {
-                      const selected = event.target.checked;
-                      setAiWebSearchSelected(selected);
-                      if (!selected) {
-                        webSearchAbortController.current?.abort();
-                        webSearchAbortController.current = null;
-                        setWebSearchListings([]);
-                        setWebSearchState("idle");
-                        setWebSearchMessage("AI Search is not selected for the next scan.");
-                        onLiveResults(liveState.flatMap((entry) => entry.listings));
-                      }
-                    }}
-                  />
-                  AI Search <small>{modelReady ? "AI enhanced" : "standard web discovery"}</small>
-                </label>
               {INTERNATIONAL_MARKETPLACES.map((marketplace) => (
                 <label key={marketplace}>
                   <input type="checkbox" checked={selectedMarkets.includes(marketplace)}
@@ -3640,6 +3690,70 @@ function BrowseView({
             </div>
             <section className="marketplace-grid international-marketplace-grid">
               {INTERNATIONAL_MARKETPLACES.map((marketplace) => renderMarketplaceCard(marketplace))}
+              <article className={`marketplace-card ai-marketplace-card ${aiWebSearchSelected ? "selected-marketplace-card" : ""}`}>
+                <div className="marketplace-card-top">
+                  <span className="large-market-logo ai-search-logo">⌕</span>
+                  <span className={`live-badge ${webSearchState}`}>
+                    {webSearchState === "ready" ? `${webSearchListings.length} loaded` : webSearchState}
+                  </span>
+                </div>
+                <div className="marketplace-card-title-row">
+                  <h2>AI Search</h2>
+                  <label className="marketplace-card-select">
+                    <input
+                      type="checkbox"
+                      checked={aiWebSearchSelected}
+                      onChange={(event) => {
+                        const selected = event.target.checked;
+                        setAiWebSearchSelected(selected);
+                        if (!selected) {
+                          webSearchAbortController.current?.abort();
+                          webSearchAbortController.current = null;
+                          setWebSearchListings([]);
+                          setWebSearchState("idle");
+                          setWebSearchMessage("AI Search is not selected for the next scan.");
+                          onLiveResults(liveState.flatMap((entry) => entry.listings));
+                        }
+                      }}
+                    />
+                    Include
+                  </label>
+                </div>
+                <p>Search public secondhand listings on eBay, Mercari US, Facebook Marketplace, and other resale sites not built into ResaleMasterLab.</p>
+                <label className="ai-market-search-field">
+                  <span aria-hidden="true">⌕</span>
+                  <input
+                    value={query}
+                    onChange={(event) => {
+                      setQuery(event.target.value);
+                      setAiSearchQueries([]);
+                      invalidateLivePagination();
+                    }}
+                    placeholder="Search public listings"
+                    aria-label="AI Search query"
+                  />
+                </label>
+                <p className="market-status">{webSearchMessage}</p>
+                <div className="marketplace-actions">
+                  <button
+                    type="button"
+                    className="primary-button"
+                    disabled={loading || !query.trim()}
+                    onClick={() => {
+                      setAiWebSearchSelected(true);
+                      if (!selectedMarkets.includes("Rakuten")) {
+                        setSelectedMarkets([...selectedMarkets, "Rakuten"]);
+                      }
+                      void loadRealListings(false, true, true);
+                    }}
+                  >
+                    {loading && webSearchState === "loading" ? "Searching…" : "Run AI Search"}
+                  </button>
+                  <small>{modelReady
+                    ? "AI web browsing + eBay/Mercari US/Facebook + selected markets + Rakuten"
+                    : "Exact-query secondhand discovery + selected markets + Rakuten"}</small>
+                </div>
+              </article>
             </section>
           </div>
         )}
@@ -4252,7 +4366,6 @@ function researchIntent(prompt: string) {
     ["JDirectItems Auction", ["jdirectitems", "yahoo auction", "jd auction"]],
     ["Rakuten Rakuma", ["rakuten rakuma", "rakuma"]],
     ["Bunjang", ["bunjang", "bungjung", "bun-jang"]],
-    ["Goofish", ["goofish", "xianyu", "superbuy"]],
     ...MARKETPLACES.map((marketplace) => [marketplace, [marketplace.toLowerCase()]] as [Marketplace, string[]]),
   ];
   const mentioned = [...new Set(aliases.filter(([, names]) => names.some((name) => lower.includes(name))).map(([marketplace]) => marketplace))];
@@ -4268,7 +4381,7 @@ function researchIntent(prompt: string) {
   const cleaned = prompt.replace(
     /\b(find|show|me|pieces?|items?|listings?|we|can|could|buy|source|from|on|and|then|sell|resell|flip|list|for|a|an|the|good|best|deals?)\b/gi,
     " ",
-  ).replace(/\b(depop|grailed|poshmark|mercari(?: japan| jp)?|jdirectitems|yahoo auction|jd auction|rakuten(?: rakuma)?|rakuma|bunjang|bungjung|goofish|xianyu|superbuy)\b/gi, " ").replace(/\s+/g, " ").trim();
+  ).replace(/\b(depop|grailed|poshmark|mercari(?: japan| jp)?|jdirectitems|yahoo auction|jd auction|rakuten(?: rakuma)?|rakuma|bunjang|bungjung)\b/gi, " ").replace(/\s+/g, " ").trim();
   return { source, target, query: brand || cleaned || "streetwear" };
 }
 

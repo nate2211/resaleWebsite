@@ -5,19 +5,20 @@ import { defineConfig } from "vite";
 /**
  * ResaleMasterLab uses two deliberate Vite paths:
  *
- * - `npm run dev:windows`: Cloudflare-enabled development with CSS HMR and
- *   the remote Browser Run binding used by zero-card marketplace fallbacks.
- * - `npm run dev:local:windows`: frontend/API development without Cloudflare.
+ * - `npm run dev:windows`: Vinext App Router development with CSS HMR and
+ *   Cloudflare bindings, including the remote Browser Run fallback.
  * - `vinext build`: the production App Router RSC/SSR Worker build.
  *
  * The production plugin reads wrangler.vinext-build.toml. The user-facing
  * wrangler.toml remains the requested assets-only SPA configuration for the
  * explicit frontend-only deployment command.
  */
-export default defineConfig(({ command, mode }) => {
-  const productionBuild = command === "build";
-  const cloudflareDevelopment = command === "serve" && mode === "cloudflare";
-  const enableCloudflare = productionBuild || cloudflareDevelopment;
+export default defineConfig(({ command }) => {
+  // Vinext's App Router must own the Vite development server. Keep the
+  // Cloudflare plugin enabled for both `vinext dev` and `vinext build` so the
+  // RSC/SSR router and bindings share the same runtime. Running raw `vite` here
+  // serves no Vinext route manifest and results in GET / 404.
+  const enableCloudflare = command === "serve" || command === "build";
 
   return {
     publicDir: "public",
@@ -28,10 +29,21 @@ export default defineConfig(({ command, mode }) => {
     css: {
       devSourcemap: true,
     },
+    ssr: {
+      // Keep the Workers native module external in the server graph as well.
+      external: ["cloudflare:workers"],
+    },
     build: {
       cssCodeSplit: false,
       assetsDir: "assets",
       sourcemap: true,
+      // `cloudflare:workers` is a workerd-provided runtime module. Vinext's
+      // first client-reference analysis pass still walks route-handler imports,
+      // so Rolldown must leave this specifier external instead of trying to
+      // resolve it from node_modules. The final Worker resolves it natively.
+      rolldownOptions: {
+        external: ["cloudflare:workers"],
+      },
     },
     plugins: [
       vinext(),
@@ -44,6 +56,7 @@ export default defineConfig(({ command, mode }) => {
                 childEnvironments: ["ssr"],
               },
               inspectorPort: false,
+              remoteBindings: true,
             }),
           ]
         : []),

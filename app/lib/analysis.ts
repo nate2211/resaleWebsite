@@ -2,17 +2,24 @@ import type { EngagementReport } from "./engagement";
 import type { WatchStatusReport } from "./watch-status";
 import type { ApparelType } from "./apparel";
 
-export const MARKETPLACES = [
-  "Depop", "Grailed", "Poshmark", "Mercari Japan", "JDirectItems Auction",
-  "Rakuten", "Rakuten Rakuma", "Bunjang", "Goofish",
-] as const;
-export const RESALE_MARKETPLACES = ["Depop", "Grailed", "Poshmark"] as const;
-export const INTERNATIONAL_MARKETPLACES = [
-  "Mercari Japan", "JDirectItems Auction", "Rakuten",
-  "Rakuten Rakuma", "Bunjang", "Goofish",
-] as const;
+export type Marketplace =
+  | "Depop" | "Grailed" | "Poshmark" | "Mercari Japan"
+  | "JDirectItems Auction" | "Rakuten" | "Rakuten Rakuma"
+  | "Bunjang" | "Goofish";
 
-export type Marketplace = (typeof MARKETPLACES)[number];
+// Goofish remains a legacy parser/API type so old saved records can still be
+// opened, but it is no longer exposed as a selectable marketplace anywhere in
+// the application. AI Search occupies its former sixth international card.
+export const MARKETPLACES: readonly Marketplace[] = [
+  "Depop", "Grailed", "Poshmark", "Mercari Japan", "JDirectItems Auction",
+  "Rakuten", "Rakuten Rakuma", "Bunjang",
+];
+export const RESALE_MARKETPLACES = ["Depop", "Grailed", "Poshmark"] as const;
+export const INTERNATIONAL_MARKETPLACES: readonly Marketplace[] = [
+  "Mercari Japan", "JDirectItems Auction", "Rakuten",
+  "Rakuten Rakuma", "Bunjang",
+];
+
 export type TargetMarketplace = Marketplace | "Auto";
 
 export type CompMap = Partial<Record<Marketplace, number[]>>;
@@ -159,7 +166,7 @@ export const MARKETPLACE_INFO: Record<
   },
   Rakuten: {
     color: "#bf0000", tint: "#fff0f0", home: "https://zenmarket.jp/en/",
-    search: (query) => `https://zenmarket.jp/en/rakuten.aspx?q=${encodeURIComponent(query)}&p=1`,
+    search: (query) => `https://zenmarket.jp/en/search.aspx?q=${encodeURIComponent(query)}&p=1&searchMode=custom&stores=0`,
     feeSummary: "Rakuten through ZenMarket; proxy and landed costs estimated",
     sourcingOnly: true, proxy: "ZenMarket", origin: "Japan",
   },
@@ -176,17 +183,16 @@ export const MARKETPLACE_INFO: Record<
     sourcingOnly: true, origin: "South Korea",
   },
   Goofish: {
-    color: "#f5c400", tint: "#fff9df", home: "https://www.goofish.com/",
+    color: "#f5c400", tint: "#fff9df", home: "https://www.superbuy.com/en/page/fleamarket/",
     search: (query) => {
       const params = new URLSearchParams({
         nTag: "Home-search",
         from: "search-input",
         keyword: query,
-        platform: "xy",
       });
       return `https://www.superbuy.com/en/page/search/?${params.toString()}`;
     },
-    feeSummary: "Goofish/Xianyu results with a Superbuy buying-agent handoff; proxy, shipping, FX, and customs estimated",
+    feeSummary: "Goofish/Xianyu listings searched through Superbuy; proxy, shipping, FX, and customs estimated",
     sourcingOnly: true, proxy: "Superbuy", origin: "China",
   },
 };

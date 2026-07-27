@@ -1,14 +1,17 @@
-# Build-only configuration consumed by @cloudflare/vite-plugin.
+# Full-stack Vinext configuration used by @cloudflare/vite-plugin during
+# development and production builds.
 #
-# The installed Miniflare/workerd build supports compatibility dates through
-# 2026-05-22. The deploy-facing wrangler.toml intentionally remains the exact
-# assets-only SPA configuration requested by the project owner.
+# Vinext 0.0.50 exports this App Router Worker entry directly. Using the
+# package entry here prevents a custom worker file from being traversed by the
+# RSC client-reference analysis pass.
 name = "audiomasterlab-vinext-build"
+main = "vinext/server/app-router-entry"
 compatibility_date = "2026-05-22"
 compatibility_flags = ["nodejs_compat"]
 
 [assets]
-not_found_handling = "single-page-application"
+binding = "ASSETS"
+not_found_handling = "none"
 
 [browser]
 binding = "BROWSER"

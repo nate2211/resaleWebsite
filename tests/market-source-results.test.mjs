@@ -13,7 +13,7 @@ test("uses dedicated ZenMarket routes with indexed original-market fallbacks", a
   const route = await source("app/api/listings/route.ts");
   for (const token of [
     "zenmarket.jp/en/yahoo.aspx",
-    "zenmarket.jp/en/rakuten.aspx",
+    "zenmarket.jp/en/search.aspx",
     "zenmarket.jp/en/rakuma.aspx",
     "auctions.yahoo.co.jp/search/search",
     "search.rakuten.co.jp/search/mall",
@@ -46,15 +46,24 @@ test("restores Depop, Mercari Japan, and Goofish discovery routes", async () => 
     "www.goofish.com/search?q=",
     "site:goofish.com/item",
     "www.superbuy.com/en/page/buy/selfservice/",
-    "www.superbuy.com/en/page/search/",
-    "platform",
+    'nTag: "Home-search"',
+    'from: "search-input"',
+    "keyword: query",
     "mercari.jp/v2/entities:search",
     "html.duckduckgo.com/html/",
     "searchHtmlItems",
+    "rakutenSearchItems",
+    "zenMarketCardItems",
+    "goofishStructuredItems",
+    "superbuySearchUrl",
   ]) assert.ok(route.includes(token), `Missing restored source route: ${token}`);
   assert.match(route, /host\.endsWith\("goofish\.com"\)/);
+  assert.match(route, /variant === "fleamarket" \? "fleamarket" : "search"/);
+  assert.match(route, /www\.superbuy\.com\/en\/page\/\$\{route\}/);
   assert.match(route, /proxyUrl: superbuyProxyUrl/);
-  assert.match(analysis, /home: "https:\/\/www\.goofish\.com\/"/);
+  assert.match(analysis, /home: "https:\/\/www\.superbuy\.com\/en\/page\/fleamarket\/"/);
+  assert.match(analysis, /nTag: "Home-search"/);
+  assert.match(analysis, /from: "search-input"/);
   assert.match(page, /Buy through Superbuy/);
   assert.match(page, /hasMore: Boolean\(response\.hasMore\) && addedCount > 0/);
 });
@@ -98,10 +107,9 @@ test("normalizes public marketplace records and yen snippets", async (t) => {
 });
 
 
-test("uses Cloudflare Browser Run only as a zero-card fallback", async () => {
-  const [route, worker, wrangler, packageJson, vite] = await Promise.all([
+test("uses Vinext routing and Cloudflare Browser Run only as a zero-card fallback", async () => {
+  const [route, wrangler, packageJson, vite] = await Promise.all([
     source("app/api/listings/route.ts"),
-    source("worker/index.ts"),
     source("wrangler.vinext-build.toml"),
     source("package.json"),
     source("vite.config.ts"),
@@ -111,12 +119,15 @@ test("uses Cloudflare Browser Run only as a zero-card fallback", async () => {
   assert.match(route, /quickAction\("links"/);
   assert.match(route, /waitForSelector/);
   assert.match(route, /if \(items\.size === 0\)/);
-  assert.match(worker, /__RML_BROWSER__/);
-  assert.match(worker, /env\.BROWSER/);
+  assert.match(route, /ZENMARKET_MARKETS = \["JDirectItems Auction", "Rakuten", "Rakuten Rakuma"\]/);
+  assert.match(route, /\["Depop", "Goofish", \.\.\.ZENMARKET_MARKETS\]/);
+  assert.match(route, /withZenMarketBrowserSlot/);
+  assert.match(route, /import\("cloudflare:workers"\)/);
+  assert.match(route, /runtime\.env/);
   assert.match(wrangler, /\[browser\]/);
   assert.match(wrangler, /binding = "BROWSER"/);
   assert.match(wrangler, /remote = true/);
-  assert.match(packageJson, /vite --mode cloudflare/);
-  assert.match(packageJson, /vite --mode local/);
-  assert.match(vite, /cloudflareDevelopment/);
+  assert.match(packageJson, /vinext dev -p 5173 -H 0\.0\.0\.0/);
+  assert.doesNotMatch(packageJson, /vite --mode cloudflare/);
+  assert.match(vite, /command === "serve" \|\| command === "build"/);
 });
