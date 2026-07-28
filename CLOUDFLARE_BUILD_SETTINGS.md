@@ -13,7 +13,7 @@ The Cloudflare zone for `cloud-cord.com` must be active in the same account. `wr
 
 No Browser Run binding is used. Marketplace adapters use bounded official page-source/index requests, while image analysis and optional local AI models execute in the visitor's browser.
 
-## v16 production behavior
+## v17 production behavior
 
 - Complete navigation remains visible on wider screens and becomes a three-bar dropdown below 1120px.
 - Search All processes two marketplaces per orchestration batch when all supported marketplaces are selected; smaller selections use batches of three.

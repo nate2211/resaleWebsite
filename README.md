@@ -1,51 +1,87 @@
-# ResaleMasterLab all-market image and result recovery v16
+# ResaleMasterLab marketplace search URL recovery v17
 
-This release keeps every production feature from v15 and fixes the marketplace selector, all-market scheduling, Depop recovery, ZenMarket store adapters, Grailed image extraction, and analysis-ready marketplace images.
-
-## v16 changes
-
-- Full navigation links on the workspace, public pages, Thrift Check, Listing Template, and the 404 page.
-- Desktop navigation stays visible; smaller screens use a three-bar button and accessible dropdown.
-- Depop uses its normal `search`, `brands`, `theme`, and `/products/` page sources, including embedded React/JSON records and `media-photos.depop.com` images.
-- Mercari Japan uses ZenMarket's Mercari catalog/page sources, store `27`, and `mercariproduct.aspx?itemCode=...` listing pages.
-- JDirectItems Auction, Rakuten, and Rakuma use stores `28`, `0`, and `25`, dedicated pages, cross-site pages, nested AJAX payloads, and canonical ZenMarket product links.
-- The marketplace selector uses a two-column compact toolbar on wide screens and a clean stacked layout on phones; helper text wraps normally without forced widths or stretched whitespace.
-- A single Search All action includes every selected marketplace but uses groups of two when every marketplace is selected and limits raw relay requests to three at a time.
-- When six or more marketplaces are selected, only the literal search is used, product-page enrichment is limited to one item per marketplace, and fallback pages are processed sequentially.
+This release keeps every production feature from v16 and corrects the marketplace selector placement, Depop product-page extraction, and the exact ZenMarket search and product-link formats supplied for Mercari Japan, JDirectItems Auction, Rakuten, and Rakuten Rakuma.
 
 Production domain: `https://resalemasterlab.cloud-cord.com`
 
-This package retains the v12 official marketplace page-source adapters, engagement fallbacks, Grailed public-index search, and ZenMarket store separation, then adds two crawlable product pages:
+## v17 changes
 
-- `/thrift-check` — phone camera/image uploads, optional purchase price, sold/active marketplace evidence, fee-aware profit and ROI, deterministic computer-vision metrics, optional sold-image similarity, and optional local AI explanation.
-- `/listing-template` — requires the locally loaded image-caption and writing models, then generates editable brand, title, category, condition, color, material, size, description, tags, list price, and floor price fields bounded by public marketplace evidence.
+### Marketplace selector
 
-## Production and SEO
+- The marketplace selection panel now appears directly below the Depop, Grailed, and Poshmark cards.
+- The panel uses a natural-width flex layout rather than a rigid multi-column grid.
+- Helper text keeps normal word spacing and never uses forced word breaking or hyphenation.
+- Desktop buttons remain compact; tablet and phone layouts stack without stretched text or blank space.
+- The default-market checkboxes wrap as natural pills.
 
-- Canonicals, Open Graph, Twitter cards, JSON-LD, sitemap, robots, PWA manifest, maskable icons, shortcuts, and screenshots use `resalemasterlab.cloud-cord.com`.
-- The homepage and both tool pages contain server-rendered explanatory copy and ordinary anchor links.
-- `wrangler.jsonc` configures `resalemasterlab.cloud-cord.com` as a Cloudflare Worker Custom Domain while keeping the workers.dev URL available for diagnostics.
-- Add the Search Console token through `NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION`.
+### Depop
 
-## Marketplace evidence
+Depop continues to start with its normal public pages:
 
-Marketplace search behavior combines the proven earlier adapters with the current bounded frontend scheduler:
+- `https://www.depop.com/search/?q=<query>&page=<page>`
+- `https://www.depop.com/brands/<slug>/?page=<page>`
+- `https://www.depop.com/theme/<slug>/?page=<page>`
+- `https://www.depop.com/products/<listing-slug>/`
 
-- Depop official search/brand/theme sources and canonical product-page enrichment.
-- Grailed active and sold public indexes.
-- Poshmark normal listing search.
-- ZenMarket: Mercari Japan `27`, JDirectItems `28`, Rakuten `0`, Rakuma `25`. The frontend accepts rendered `product-item product-link` cards, nested `.d` JSON payloads, `Items` arrays, `ItemCode`, `ClearTitle`, `PreviewImageUrl`, and `PriceTextControl`.
-- Partial failures use settled-result handling.
-- Browser Run is not configured.
+The new dedicated product-page parser reads normal HTML, embedded React/JSON, Open Graph fields, JSON-LD, and readable page-source text. It preserves:
 
-## Local AI
+- Canonical `/products/` URL
+- First-party `media-photos.depop.com` image
+- Title and description
+- Published USD price
+- Size
+- Condition
+- Brand
+- Seller context
 
-The browser downloads and caches:
+A `view-source:` prefix is stripped when a user pastes one, but runtime requests use the normal HTTPS product URL.
 
-- `HuggingFaceTB/SmolLM2-135M-Instruct` for bounded writing/explanation.
-- `Xenova/vit-gpt2-image-captioning` for item-photo captions.
+### ZenMarket marketplace searches
 
-Thrift Check can work without AI when the user supplies a searchable item description. Listing Template intentionally requires both models.
+Search terms are joined with the encoded plus separator expected by the supplied ZenMarket searches. The exact store-filter searches are:
+
+- Mercari Japan: `stores=27`
+- JDirectItems Auction: `stores=28`
+- Rakuten: `stores=0`
+- Rakuten Rakuma: `stores=25`
+
+All use:
+
+```text
+https://zenmarket.jp/en/search.aspx?q=<encoded-query>&p=<page>&searchMode=custom&stores=<store-id>
+```
+
+Result cards normalize to ZenMarket's normal root product routes:
+
+```text
+https://zenmarket.jp/mercariproduct.aspx?itemCode=...
+https://zenmarket.jp/auction.aspx?itemCode=...
+https://zenmarket.jp/rakutenproduct.aspx?itemCode=...
+https://zenmarket.jp/rakumaproduct.aspx?itemCode=...
+```
+
+The parser retains `q`, `p`, `pos`, and `cs` when they are present in the source link. It accepts both root and `/en/` source links, nested ASP.NET `.d` payloads, `Items` arrays, and serialized `ItemCode` records, then emits one canonical root product URL.
+
+### Bounded production requests
+
+- All-market mode continues to use two marketplaces per outer batch.
+- At most three same-origin relay requests are active globally.
+- Only the literal query is used when six or more markets are selected.
+- ZenMarket compact catalog attempts are bounded to three endpoints.
+- Page-source fallbacks run sequentially inside each marketplace.
+- Product-page enrichment is limited to one listing per marketplace in all-market mode.
+- Failed relays return a partial HTTP 200 envelope so the frontend can continue to the browser bridge without console 502 floods.
+- No Cloudflare Browser Run binding is configured.
+
+## Existing production features retained
+
+- Complete sticky responsive navbar on every page
+- Thrift Check with image upload/camera, profit math, sold analysis, optional vision, and optional local AI
+- Listing Template with local image captioning, local text generation, and market-bounded pricing
+- Depop, Grailed, Poshmark, Mercari Japan, JDirectItems, Rakuten, Rakuma, Bunjang, Goofish/Superbuy compatibility, and AI Search
+- Grailed active/sold public-index search and nested image extraction
+- Nonfatal engagement analysis
+- Sitemap, robots, manifest, icons, screenshots, canonical metadata, Open Graph, Twitter cards, and JSON-LD
 
 ## Run and deploy
 
@@ -58,8 +94,8 @@ npm run deploy
 npm run check:production
 ```
 
-Set Cloudflare Git builds to Node 22 with build command `npm run build:windows` and deploy command `npm run deploy`.
+Cloudflare Git builds should use Node 22, build command `npm run build:windows`, and deploy command `npm run deploy`.
 
-## Safety and limitations
+## Limitations
 
-Results are planning estimates. Public prices may be stale or incomplete. Image metrics measure visual/photo similarity and readability, not authenticity. Verify brand, fabric, size, measurements, condition, fees, and availability before purchasing or publishing.
+Marketplace pages can change or block datacenter traffic. The included browser bridge remains the fallback when an official page blocks the lightweight Cloudflare relay. Results are public planning evidence and should be verified on the original listing before purchase or publication.

@@ -15,6 +15,10 @@ export const MARKETPLACES: readonly Marketplace[] = [
   "Rakuten", "Rakuten Rakuma", "Bunjang",
 ];
 export const RESALE_MARKETPLACES = ["Depop", "Grailed", "Poshmark"] as const;
+
+function zenMarketQuery(value: string) {
+  return value.trim().split(/\s+/).filter(Boolean).map(encodeURIComponent).join("%2B");
+}
 export const INTERNATIONAL_MARKETPLACES: readonly Marketplace[] = [
   "Mercari Japan", "JDirectItems Auction", "Rakuten",
   "Rakuten Rakuma", "Bunjang",
@@ -154,25 +158,25 @@ export const MARKETPLACE_INFO: Record<
   },
   "Mercari Japan": {
     color: "#ff3158", tint: "#fff0f4", home: "https://zenmarket.jp/en/mercari.aspx",
-    search: (query) => `https://zenmarket.jp/en/search.aspx?q=${encodeURIComponent(query)}&p=1&searchMode=custom&stores=27`,
+    search: (query) => `https://zenmarket.jp/en/search.aspx?q=${zenMarketQuery(query)}&p=1&searchMode=custom&stores=27`,
     feeSummary: "Japan source; landed-cost estimator includes shipping, FX, and customs reserve",
     sourcingOnly: true, origin: "Japan",
   },
   "JDirectItems Auction": {
     color: "#d43b31", tint: "#fff1ef", home: "https://zenmarket.jp/en/",
-    search: (query) => `https://zenmarket.jp/en/search.aspx?q=${encodeURIComponent(query)}&p=1&searchMode=custom&stores=28`,
+    search: (query) => `https://zenmarket.jp/en/search.aspx?q=${zenMarketQuery(query)}&p=1&searchMode=custom&stores=28`,
     feeSummary: "ZenMarket source; proxy and international landed costs estimated",
     sourcingOnly: true, proxy: "ZenMarket", origin: "Japan",
   },
   Rakuten: {
     color: "#bf0000", tint: "#fff0f0", home: "https://zenmarket.jp/en/",
-    search: (query) => `https://zenmarket.jp/en/search.aspx?q=${encodeURIComponent(query)}&p=1&searchMode=custom&stores=0`,
+    search: (query) => `https://zenmarket.jp/en/search.aspx?q=${zenMarketQuery(query)}&p=1&searchMode=custom&stores=0`,
     feeSummary: "Rakuten through ZenMarket; proxy and landed costs estimated",
     sourcingOnly: true, proxy: "ZenMarket", origin: "Japan",
   },
   "Rakuten Rakuma": {
     color: "#59b75c", tint: "#effaf0", home: "https://zenmarket.jp/en/",
-    search: (query) => `https://zenmarket.jp/en/search.aspx?q=${encodeURIComponent(query)}&p=1&searchMode=custom&stores=25`,
+    search: (query) => `https://zenmarket.jp/en/search.aspx?q=${zenMarketQuery(query)}&p=1&searchMode=custom&stores=25`,
     feeSummary: "Rakuma through ZenMarket; proxy and landed costs estimated",
     sourcingOnly: true, proxy: "ZenMarket", origin: "Japan",
   },

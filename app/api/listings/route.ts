@@ -1,7 +1,7 @@
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
-const WORKER_REVISION = "all-market-images-production-v16";
+const WORKER_REVISION = "market-search-url-recovery-production-v17";
 const MAX_BODY_BYTES = 5_500_000;
 const UPSTREAM_TIMEOUT_MS = 15_000;
 const MAX_REDIRECTS = 2;
@@ -100,18 +100,24 @@ async function fetchMarketplacePage(initialUrl: URL, requestSignal: AbortSignal)
     const abort = () => controller.abort();
     requestSignal.addEventListener("abort", abort, { once: true });
     try {
+      const requestHeaders: Record<string, string> = {
+        accept: "text/html,application/xhtml+xml,application/json,text/plain;q=0.9,*/*;q=0.6",
+        "accept-language": "en-US,en;q=0.9",
+        "cache-control": "no-cache",
+        pragma: "no-cache",
+        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/150 Safari/537.36",
+      };
+      if (hostnameMatches(current.hostname.toLowerCase(), "zenmarket.jp")) {
+        requestHeaders.referer = "https://zenmarket.jp/en/";
+      } else if (hostnameMatches(current.hostname.toLowerCase(), "depop.com")) {
+        requestHeaders.referer = "https://www.depop.com/";
+      }
       const response = await fetch(current, {
         method: "GET",
         redirect: "manual",
         cache: "no-store",
         signal: controller.signal,
-        headers: {
-          accept: "text/html,application/xhtml+xml,application/json,text/plain;q=0.9,*/*;q=0.6",
-          "accept-language": "en-US,en;q=0.9",
-          "cache-control": "no-cache",
-          pragma: "no-cache",
-          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/150 Safari/537.36",
-        },
+        headers: requestHeaders,
       });
       if ([301, 302, 303, 307, 308].includes(response.status)) {
         const location = response.headers.get("location");
@@ -168,7 +174,7 @@ async function relay(request: Request) {
       },
     });
   } catch (error) {
-    return errorJson(error instanceof Error ? error.message : "Marketplace request failed.", 502);
+    return errorJson(error instanceof Error ? error.message : "Marketplace request failed.", 200);
   }
 }
 

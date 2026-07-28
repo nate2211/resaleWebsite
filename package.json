@@ -1,6 +1,6 @@
 {
   "name": "resalemasterlab",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "private": true,
   "engines": {
     "node": ">=22.13.0"
@@ -56,5 +56,5 @@
     "wrangler": "4.92.0"
   },
   "type": "module",
-  "description": "Production ResaleMasterLab with compact marketplace controls, bounded all-market search, restored Depop and ZenMarket results, and Grailed image recovery."
+  "description": "Production ResaleMasterLab with a compact selector below the default market cards, exact Depop product-source parsing, and corrected ZenMarket store searches and product routes."
 }

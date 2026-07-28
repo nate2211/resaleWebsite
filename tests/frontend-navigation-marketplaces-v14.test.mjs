@@ -32,9 +32,9 @@ test("Depop and ZenMarket Mercari use official search and listing page sources",
   assert.match(client, /depopMarkdownListings\(source, response\.url\)/);
   assert.match(depopParser, /media-photos\\\.depop\\\.com/);
   assert.doesNotMatch(depopParser, /if \(!image\) continue/);
-  assert.match(client, /zenmarket\.jp\/en\/mercari\.aspx\?q=/);
+  assert.match(client, /zenmarket\.jp\/en\/search\.aspx\?q=/);
   assert.match(client, /searchMode=custom&stores=27/);
-  assert.match(client, /zenmarket\.jp\/en\/mercariproduct\.aspx\?itemCode=/);
+  assert.match(client, /zenMarketCanonicalUrl\("Mercari Japan", id\)/);
   assert.match(client, /storeId === "27"/);
 });
 

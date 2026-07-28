@@ -11,10 +11,11 @@ import {
   priceFromPublicText,
 } from "./public-listing-record";
 import { inferApparelType } from "./apparel";
-import { zenMarketCatalogRecords } from "./zenmarket-source-parsers";
+import { parseZenMarketPageSource, zenMarketCanonicalUrl, zenMarketCatalogRecords } from "./zenmarket-source-parsers";
 import {
   GRAILED_PUBLIC_CONFIG_FALLBACK,
   grailedHitToRecord,
+  parseDepopProductPageSource,
   parseDepopReaderMarkdown,
   parseGrailedPublicConfig,
   type GrailedPublicConfig,
@@ -170,6 +171,10 @@ function slugify(value: string) {
     .slice(0, 80);
 }
 
+function encodeZenMarketQuery(value: string) {
+  return value.trim().split(/\s+/).filter(Boolean).map(encodeURIComponent).join("%2B");
+}
+
 export function frontendMarketplaceUrls(
   marketplace: Marketplace,
   query: string,
@@ -177,6 +182,7 @@ export function frontendMarketplaceUrls(
   mode: "active" | "sold" = "active",
 ) {
   const q = encodeURIComponent(query);
+  const zenQ = encodeZenMarketQuery(query);
   const p = String(page + 1);
   if (marketplace === "Depop") {
     const slug = slugify(query);
@@ -192,27 +198,23 @@ export function frontendMarketplaceUrls(
     ? `https://www.grailed.com/sold?query=${q}&page=${p}`
     : `https://www.grailed.com/shop?query=${q}&page=${p}`];
   if (marketplace === "Poshmark") return [`https://poshmark.com/search?query=${q}&type=listings&src=ac&page=${p}`];
-  if (marketplace === "Mercari Japan") {
-    return [
-      // ZenMarket's normal Mercari tab and its cross-site store filter are both
-      // requested because either page may expose the listing source first.
-      `https://zenmarket.jp/en/mercari.aspx?q=${q}&p=${p}`,
-      `https://zenmarket.jp/en/search.aspx?q=${q}&p=${p}&searchMode=custom&stores=27`,
-    ];
-  }
+  if (marketplace === "Mercari Japan") return [
+    `https://zenmarket.jp/en/search.aspx?q=${zenQ}&p=${p}&searchMode=custom&stores=27`,
+    `https://zenmarket.jp/en/mercari.aspx?q=${q}&p=${p}`,
+  ];
   if (marketplace === "JDirectItems Auction") return [
+    `https://zenmarket.jp/en/search.aspx?q=${zenQ}&p=${p}&searchMode=custom&stores=28`,
     `https://zenmarket.jp/en/yahoo.aspx?q=${q}&p=${p}`,
-    `https://zenmarket.jp/en/search.aspx?q=${q}&p=${p}&searchMode=custom&stores=28`,
     `https://auctions.yahoo.co.jp/search/search?p=${q}&b=${page * 50 + 1}&n=50`,
   ];
   if (marketplace === "Rakuten") return [
+    `https://zenmarket.jp/en/search.aspx?q=${zenQ}&p=${p}&searchMode=custom&stores=0`,
     `https://zenmarket.jp/en/rakuten.aspx?q=${q}&p=${p}`,
-    `https://zenmarket.jp/en/search.aspx?q=${q}&p=${p}&searchMode=custom&stores=0`,
     `https://search.rakuten.co.jp/search/mall/${q}/?p=${p}`,
   ];
   if (marketplace === "Rakuten Rakuma") return [
+    `https://zenmarket.jp/en/search.aspx?q=${zenQ}&p=${p}&searchMode=custom&stores=25`,
     `https://zenmarket.jp/en/rakuma.aspx?q=${q}&p=${p}`,
-    `https://zenmarket.jp/en/search.aspx?q=${q}&p=${p}&searchMode=custom&stores=25`,
     `https://fril.jp/s?query=${q}&page=${p}`,
   ];
   if (marketplace === "Bunjang") return [`https://globalbunjang.com/search?q=${q}&page=${p}`];
@@ -220,7 +222,8 @@ export function frontendMarketplaceUrls(
     `https://www.superbuy.com/en/page/search/?nTag=Home-search&from=search-input&keyword=${q}`,
     `https://www.goofish.com/search?q=${q}`,
   ];
-  return [MARKETPLACE_INFO[marketplace].search(query)];
+  const fallbackMarketplace = marketplace as keyof typeof MARKETPLACE_INFO;
+  return [MARKETPLACE_INFO[fallbackMarketplace].search(query)];
 }
 
 function mergeAbortSignals(primary: AbortSignal | undefined, timeoutMs: number) {
@@ -651,16 +654,16 @@ function marketplaceRecordWithUrl(
     enriched.url = `/listings/${id}${slug ? `-${slug.replace(new RegExp(`^${id}-?`), "")}` : ""}`;
   } else if (marketplace === "Mercari Japan"
     && (storeId === "27" || /mercari/i.test(storeName) || (!storeId && !storeName))) {
-    enriched.url = `https://zenmarket.jp/en/mercariproduct.aspx?itemCode=${encodeURIComponent(id)}`;
+    enriched.url = zenMarketCanonicalUrl("Mercari Japan", id);
   } else if (marketplace === "Rakuten"
     && (storeId === "0" || /rakuten/i.test(storeName) || (!storeId && !storeName))) {
-    enriched.url = `https://zenmarket.jp/en/rakutenproduct.aspx?itemCode=${encodeURIComponent(id)}`;
+    enriched.url = zenMarketCanonicalUrl("Rakuten", id);
   } else if (marketplace === "JDirectItems Auction"
     && (storeId === "28" || /auction|yahoo|jdirect/i.test(storeName) || (!storeId && !storeName))) {
-    enriched.url = `https://zenmarket.jp/en/auction.aspx?itemCode=${encodeURIComponent(id)}`;
+    enriched.url = zenMarketCanonicalUrl("JDirectItems Auction", id);
   } else if (marketplace === "Rakuten Rakuma"
     && (storeId === "25" || /rakuma|fril/i.test(storeName) || (!storeId && !storeName))) {
-    enriched.url = `https://zenmarket.jp/en/rakumaproduct.aspx?itemCode=${encodeURIComponent(id)}`;
+    enriched.url = zenMarketCanonicalUrl("Rakuten Rakuma", id);
   }
   return enriched;
 }
@@ -691,21 +694,25 @@ function canonicalListingUrl(value: string, marketplace: Marketplace, base: stri
         && [...parsed.searchParams.keys()].some((key) => /item|code|id/i.test(key));
       if (!directMercari && !zenMarketMercari) return "";
       if (directMercari) parsed.search = "";
+      else parsed.pathname = "/mercariproduct.aspx";
     } else if (marketplace === "Rakuten") {
       const valid = (hostMatches("zenmarket.jp") && /rakutenproduct\.aspx/i.test(path))
         || (host === "item.rakuten.co.jp" && path.split("/").filter(Boolean).length >= 2);
       if (!valid) return "";
+      if (hostMatches("zenmarket.jp")) parsed.pathname = "/rakutenproduct.aspx";
     } else if (marketplace === "JDirectItems Auction") {
       const valid = (hostMatches("zenmarket.jp") && /(?:auction|yahoo).*\.aspx/i.test(path)
           && [...parsed.searchParams.keys()].some((key) => /item|code|id|auction/i.test(key)))
         || (hostMatches("auctions.yahoo.co.jp") && /\/auction\//i.test(path));
       if (!valid) return "";
+      if (hostMatches("zenmarket.jp")) parsed.pathname = "/auction.aspx";
     } else if (marketplace === "Rakuten Rakuma") {
       const valid = (hostMatches("zenmarket.jp") && /rakuma.*\.aspx/i.test(path)
           && [...parsed.searchParams.keys()].some((key) => /item|code|id/i.test(key)))
         || (host === "item.fril.jp" && path.length > 1)
         || (hostMatches("fril.jp") && /\/(?:shop|item)\//i.test(path));
       if (!valid) return "";
+      if (hostMatches("zenmarket.jp")) parsed.pathname = "/rakumaproduct.aspx";
     } else if (marketplace === "Bunjang") {
       if (!hostMatches("globalbunjang.com") || !/(?:product|products|item)\//i.test(path)) return "";
     }
@@ -1118,6 +1125,14 @@ function parseResponse(response: TextResponse, marketplace: Marketplace) {
   const output: Partial<Listing>[] = [];
   if (marketplace === "Depop") {
     output.push(...depopMarkdownListings(source, response.url));
+    const product = parseDepopProductPageSource(source, response.url);
+    if (product) {
+      const listing = partialFromRecord(product as unknown as Record<string, unknown>, "Depop", response.url);
+      if (listing) {
+        listing.condition = product.condition || listing.condition;
+        output.push(listing);
+      }
+    }
   }
   if (/json/i.test(response.contentType) || /^[\[{]/.test(source)) {
     try {
@@ -1136,6 +1151,13 @@ function parseResponse(response: TextResponse, marketplace: Marketplace) {
     } catch {
       // Continue with page-source parsing.
     }
+  }
+  if (["Mercari Japan", "JDirectItems Auction", "Rakuten", "Rakuten Rakuma"].includes(marketplace)) {
+    output.push(...parseZenMarketPageSource(
+      normalizedSource,
+      marketplace as "Mercari Japan" | "JDirectItems Auction" | "Rakuten" | "Rakuten Rakuma",
+      response.url,
+    ).map((record) => partialFromRecord(record, marketplace, response.url)).filter(Boolean) as Partial<Listing>[]);
   }
   if (/<(?:!doctype|html|body|script|a)\b/i.test(source)) {
     output.push(...parseHtml(source, marketplace, response.url));

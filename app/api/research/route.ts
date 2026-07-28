@@ -1,3 +1,7 @@
+function zenMarketQuery(value: string) {
+  return value.trim().split(/\s+/).filter(Boolean).map(encodeURIComponent).join("%2B");
+}
+
 const MARKET_URLS = {
   Depop: (query: string) => `https://www.depop.com/search/?q=${encodeURIComponent(query)}`,
   Grailed: (query: string) =>
@@ -5,15 +9,15 @@ const MARKET_URLS = {
   Poshmark: (query: string) =>
     `https://poshmark.com/search?query=${encodeURIComponent(query)}&type=listings&src=ac`,
   "Mercari Japan": (query: string) =>
-    `https://zenmarket.jp/en/search.aspx?q=${encodeURIComponent(query)}&p=1&searchMode=custom&stores=27`,
+    `https://zenmarket.jp/en/search.aspx?q=${zenMarketQuery(query)}&p=1&searchMode=custom&stores=27`,
   "Mercari Japan sold": (query: string) =>
-    `https://zenmarket.jp/en/search.aspx?q=${encodeURIComponent(query)}&p=1&searchMode=custom&stores=27`,
+    `https://zenmarket.jp/en/search.aspx?q=${zenMarketQuery(query)}&p=1&searchMode=custom&stores=27`,
   "JDirectItems Auction": (query: string) =>
-    `https://zenmarket.jp/en/yahoo.aspx?q=${encodeURIComponent(query)}&p=1`,
+    `https://zenmarket.jp/en/search.aspx?q=${zenMarketQuery(query)}&p=1&searchMode=custom&stores=28`,
   Rakuten: (query: string) =>
-    `https://zenmarket.jp/en/search.aspx?q=${encodeURIComponent(query)}&p=1&searchMode=custom&stores=0`,
+    `https://zenmarket.jp/en/search.aspx?q=${zenMarketQuery(query)}&p=1&searchMode=custom&stores=0`,
   "Rakuten Rakuma": (query: string) =>
-    `https://zenmarket.jp/en/rakuma.aspx?q=${encodeURIComponent(query)}&p=1`,
+    `https://zenmarket.jp/en/search.aspx?q=${zenMarketQuery(query)}&p=1&searchMode=custom&stores=25`,
   Bunjang: (query: string) =>
     `https://globalbunjang.com/search?q=${encodeURIComponent(query)}`,
   Goofish: (query: string) => {

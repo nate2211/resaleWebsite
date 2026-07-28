@@ -3,7 +3,7 @@ import { unwrapZenMarketPayload } from "../../lib/zenmarket-source-parsers";
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
-const WORKER_REVISION = "all-market-images-production-v16";
+const WORKER_REVISION = "market-search-url-recovery-production-v17";
 const MAX_BODY_BYTES = 2_000_000;
 const TOTAL_TIMEOUT_MS = 12_000;
 const ATTEMPT_TIMEOUT_MS = 4_500;
@@ -71,39 +71,44 @@ function parsedPayload(text: string) {
 }
 
 function endpointCandidates(config: MarketConfig, query: string, page: number) {
-  const params = new URLSearchParams({ q: query, p: String(page + 1) });
-  if (config.sort) {
-    for (const part of config.sort.split("&")) {
-      const [key, value] = part.split("=");
-      if (key && value) params.set(key, value);
-    }
-  }
-  const dedicated: Array<{ endpoint: string; body: Record<string, unknown> }> = config.endpointNames.map((name) => ({
-    endpoint: `https://zenmarket.jp/en/${name}?${params.toString()}`,
-    body: { page: page + 1, p: page + 1, query, q: query },
-  }));
-  // ZenMarket's current cross-site search supports explicit store filtering.
-  // Keep one bounded compatibility attempt for deployments where the dedicated
-  // marketplace endpoint has moved behind the unified search page.
+  const pageNumber = page + 1;
   const crossParams = new URLSearchParams({
     q: query,
-    p: String(page + 1),
+    p: String(pageNumber),
     searchMode: "custom",
     stores: String(config.storeId),
   });
-  dedicated.push({
-    endpoint: `https://zenmarket.jp/en/search.aspx/GetProducts?${crossParams.toString()}`,
-    body: {
-      query,
-      q: query,
-      page: page + 1,
-      p: page + 1,
-      searchMode: "custom",
-      stores: String(config.storeId),
-      storeIds: [config.storeId],
+  const body = {
+    query,
+    q: query,
+    page: pageNumber,
+    p: pageNumber,
+    searchMode: "custom",
+    stores: String(config.storeId),
+    storeId: config.storeId,
+    storeIds: [config.storeId],
+  };
+  const dedicatedParams = new URLSearchParams({ q: query, p: String(pageNumber) });
+  if (config.sort) {
+    for (const part of config.sort.split("&")) {
+      const [key, value] = part.split("=");
+      if (key && value) dedicatedParams.set(key, value);
+    }
+  }
+  return [
+    {
+      endpoint: `https://zenmarket.jp/en/search.aspx/GetProducts?${crossParams.toString()}`,
+      body,
     },
-  });
-  return dedicated.slice(0, 3);
+    {
+      endpoint: `https://zenmarket.jp/search.aspx/GetProducts?${crossParams.toString()}`,
+      body,
+    },
+    {
+      endpoint: `https://zenmarket.jp/en/${config.page}/GetProducts?${dedicatedParams.toString()}`,
+      body: { ...body, pageType: config.page.replace(".aspx", "") },
+    },
+  ];
 }
 
 async function fetchCandidate(

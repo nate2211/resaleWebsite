@@ -66,8 +66,8 @@ test("compact selector CSS remains syntactically balanced and mobile-safe", asyn
   const closes = (css.match(/\}/g) || []).length;
   assert.equal(opens, closes);
   assert.match(css, /grid-template-columns: minmax\(0, 1fr\) auto/);
-  assert.match(css, /overflow-wrap: break-word/);
-  assert.match(css, /@media \(max-width: 460px\)/);
+  assert.match(css, /overflow-wrap: normal/);
+  assert.match(css, /@media \(max-width: 420px\)/);
 });
 
 test("ZenMarket relay retries a compatibility endpoint and unwraps a real card payload", async (t) => {

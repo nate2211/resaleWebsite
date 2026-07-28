@@ -3709,41 +3709,47 @@ function BrowseView({
         {marketSelectionMessage && hasSelectedRequestMarkets && (
           <p className="market-selection-warning" role="status">{marketSelectionMessage}</p>
         )}
-        <div className="market-selection-panel">
-          <div className="market-selection-actions" aria-label="Marketplace selection actions">
-            <div className="market-selection-copy">
-              <strong>Marketplace selection</strong>
-              <p className="market-selection-note">
-                Choose the marketplaces below. One search runs them in small, controlled batches.
-              </p>
-            </div>
-            <div className="market-selection-buttons">
-              <button
-                type="button"
-                className="secondary-button"
-                onClick={() => {
-                  setSelectedMarkets([...MARKETPLACES]);
-                  setInternationalSection(true);
-                  setMarketSelectionMessage("All supported marketplaces are selected. The scan will use bounded concurrency.");
-                }}
-              >
-                Select all markets
-              </button>
-              <button
-                type="button"
-                className="secondary-button"
-                onClick={() => {
-                  setSelectedMarkets([]);
-                  setAiWebSearchSelected(false);
-                  setMarketSelectionMessage("Marketplace selection cleared.");
-                }}
-              >
-                Clear selection
-              </button>
-            </div>
+      </section>
+
+      <section className="marketplace-grid default-marketplace-grid">
+        {RESALE_MARKETPLACES.map((marketplace) => renderMarketplaceCard(marketplace))}
+      </section>
+
+      <section className="market-selection-panel" aria-labelledby="market-selection-heading">
+        <div className="market-selection-actions" aria-label="Marketplace selection actions">
+          <div className="market-selection-copy">
+            <strong id="market-selection-heading">Choose marketplaces</strong>
+            <p className="market-selection-note">
+              Select any combination below. Search All runs the selected marketplaces in small, controlled batches.
+            </p>
           </div>
-          <div className="query-options default-query-options">
-            <span>Default marketplaces</span>
+          <div className="market-selection-buttons">
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={() => {
+                setSelectedMarkets([...MARKETPLACES]);
+                setInternationalSection(true);
+                setMarketSelectionMessage("All supported marketplaces are selected. The scan will use bounded concurrency.");
+              }}
+            >
+              Select all markets
+            </button>
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={() => {
+                setSelectedMarkets([]);
+                setAiWebSearchSelected(false);
+                setMarketSelectionMessage("Marketplace selection cleared.");
+              }}
+            >
+              Clear selection
+            </button>
+          </div>
+        </div>
+        <div className="query-options default-query-options">
+          <span>Default marketplaces</span>
           {RESALE_MARKETPLACES.map((marketplace) => (
             <label key={marketplace}>
               <input type="checkbox" checked={selectedMarkets.includes(marketplace)}
@@ -3751,17 +3757,12 @@ function BrowseView({
               {marketplace}
             </label>
           ))}
-            <label className="favorites-priority-toggle">
-              <input type="checkbox" checked={favoritesFirst}
-                onChange={(event) => setFavoritesFirst(event.target.checked)} />
-              Prioritize favorites and similar pieces
-            </label>
-          </div>
+          <label className="favorites-priority-toggle">
+            <input type="checkbox" checked={favoritesFirst}
+              onChange={(event) => setFavoritesFirst(event.target.checked)} />
+            Prioritize favorites and similar pieces
+          </label>
         </div>
-      </section>
-
-      <section className="marketplace-grid default-marketplace-grid">
-        {RESALE_MARKETPLACES.map((marketplace) => renderMarketplaceCard(marketplace))}
       </section>
 
       <section className={`panel international-market-section ${internationalMarketsOpen ? "open" : ""}`}>

@@ -9,6 +9,87 @@ export type DepopReaderRecord = {
   description: string;
 };
 
+
+export type DepopProductRecord = DepopReaderRecord & {
+  condition: string;
+  seller: string;
+};
+
+function htmlEntityText(value: string) {
+  return cleanText(value)
+    .replaceAll("&#36;", "$")
+    .replaceAll("&pound;", "£")
+    .replaceAll("&yen;", "¥");
+}
+
+/** Parse one normal Depop /products/ page or its readable page-source form. */
+export function parseDepopProductPageSource(source: string, pageUrl: string): DepopProductRecord | null {
+  const url = canonicalDepopUrl(pageUrl.replace(/^view-source:/i, ""));
+  if (!url) return null;
+  const normalized = source.replace(/\r\n?/g, "\n")
+    .replaceAll("\u002F", "/")
+    .replaceAll("\u0026", "&")
+    .replaceAll("\/", "/")
+    .replaceAll("&amp;", "&");
+  const meta = (property: string) => normalized.match(new RegExp(`<meta[^>]+(?:property|name)=["']${property.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["'][^>]+content=["']([^"']+)["']`, "i"))?.[1]
+    || normalized.match(new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+(?:property|name)=["']${property.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["']`, "i"))?.[1] || "";
+  const title = htmlEntityText(
+    meta("og:title")
+    || meta("twitter:title")
+    || normalized.match(/^#\s+([^\n]{3,400})/m)?.[1]
+    || normalized.match(/"(?:display_?title|product_?name|item_?name|title)"\s*:\s*"([^"\n]{3,400})"/i)?.[1]
+    || "Depop listing",
+  ).replace(/\s*[|·-]\s*Depop\s*$/i, "").trim();
+  const image = bestDepopImage(normalized)
+    || meta("og:image").replaceAll("&amp;", "&")
+    || meta("twitter:image").replaceAll("&amp;", "&");
+  const priceValues = [
+    meta("product:price:amount"),
+    ...[...normalized.matchAll(/(?:US\$|\$)\s*([\d,.]+)/gi)].map((match) => match[1]),
+  ].map((value) => Number.parseFloat(String(value).replaceAll(",", "")))
+    .filter((value) => Number.isFinite(value) && value > 0);
+  const price = priceValues[0] || priceValues.at(-1) || 0;
+  const size = htmlEntityText(
+    normalized.match(/(?:^|\n)\s*Size\s+([^\n•]{1,40})/i)?.[1]
+    || normalized.match(/"(?:display_?size|size_name|size)"\s*:\s*"([^"\n]{1,80})"/i)?.[1]
+    || "Unknown",
+  );
+  const condition = htmlEntityText(
+    normalized.match(/(?:^|\n)\s*(Excellent|Good|Fair|Brand new|Like new|Used)[^\n•]{0,40}condition/i)?.[0]
+    || normalized.match(/"condition"\s*:\s*"([^"\n]{2,100})"/i)?.[1]
+    || "Check listing",
+  );
+  const brand = htmlEntityText(
+    normalized.match(/"(?:brand_name|brandName|brand)"\s*:\s*"([^"\n]{2,120})"/i)?.[1]
+    || normalized.match(/(?:condition\s*\n?\s*•?\s*)([A-Z][^\n]{1,100})/i)?.[1]
+    || "Unspecified",
+  );
+  const seller = htmlEntityText(
+    normalized.match(/item listed by\s+([^\]\n<]{2,100})/i)?.[1]
+    || normalized.match(/(?:^|\n)(@[a-z0-9_.-]{2,60}|_[a-z0-9_.-]{2,60})\s*(?:\n|$)/im)?.[1]
+    || normalized.match(/"(?:username|seller_username|sellerName)"\s*:\s*"([^"\n]{2,100})"/i)?.[1]
+    || "",
+  );
+  const description = htmlEntityText(
+    meta("og:description")
+    || meta("description")
+    || normalized.match(/(?:Buyer Protection[^\n]*\n+[-*\s]*)([\s\S]{20,1600}?)(?:\n[-*\s]*Visit shop|\n## More from this seller)/i)?.[1]
+    || normalized,
+  ).slice(0, 1200);
+  return {
+    url,
+    title: title || "Depop listing",
+    brand: brand || "Unspecified",
+    size: size || "Unknown",
+    price,
+    currency: "USD",
+    image,
+    description: [description, seller ? `Seller ${seller}.` : ""].filter(Boolean).join(" "),
+    condition: condition || "Check listing",
+    seller,
+  };
+}
+
 export type GrailedPublicConfig = {
   appId: string;
   apiKey: string;
