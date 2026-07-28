@@ -13,7 +13,7 @@
     "build:windows": "node scripts/validate-vinext-entry.mjs && vinext build && node scripts/prepare-static-build.mjs",
     "start": "vinext start",
     "start:windows": "vinext start",
-    "test": "node --test tests/*.test.mjs",
+    "test": "node --test tests/frontend-*.test.mjs tests/engagement-fixtures.test.mjs tests/watch-monitor.test.mjs tests/vinext-entry-validation.test.mjs tests/vinext-root-routing.test.mjs",
     "test:full": "npm run lint && npm run build:verified && npm test",
     "validate:artifact": "node scripts/validate-vinext-build.mjs",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
@@ -29,7 +29,8 @@
     "dev:local:windows": "vinext dev -p 5173 -H 0.0.0.0",
     "validate:vinext-entry": "node scripts/validate-vinext-entry.mjs",
     "deploy:verified": "npm test && npm run seo:validate && npm run deploy && node scripts/check-production.mjs",
-    "check:production": "node scripts/check-production.mjs"
+    "check:production": "node scripts/check-production.mjs",
+    "validate:frontend": "node --test tests/frontend-*.test.mjs"
   },
   "dependencies": {
     "@huggingface/transformers": "^4.2.0",

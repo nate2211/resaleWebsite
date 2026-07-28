@@ -1,63 +1,40 @@
-# Deploy ResaleMasterLab to the existing workers.dev Worker
+# Deploy to Cloudflare workers.dev
 
-Production URL: `https://resalewebsite.unusualsuspectsclothing.workers.dev/`
+Target:
 
-This project does **not** require a custom domain. The Worker name is `resalewebsite`, and it must match the existing Cloudflare Workers project connected to the Git repository. Cloudflare appends the account subdomain `unusualsuspectsclothing.workers.dev` automatically.
-
-## Cloudflare Workers Builds settings
-
-In **Workers & Pages → resalewebsite → Settings → Builds**, use:
-
-- Root directory: repository root
-- Build command: `npm run build:windows`
-- Deploy command: `npm run deploy`
-- Non-production deploy command: `npm run preview:cloudflare`
-- Node.js: 22
-
-The build command only compiles Vinext. The deploy command is what uploads and activates the full Worker, including `/api/*`, server rendering, assets, and the `BROWSER` binding. Do not use `npm run deploy:static`.
-
-## Required Wrangler settings
-
-`wrangler.jsonc` intentionally contains:
-
-```json
-{
-  "name": "resalewebsite",
-  "workers_dev": true,
-  "preview_urls": true,
-  "browser": { "binding": "BROWSER" }
-}
+```text
+https://resalewebsite.unusualsuspectsclothing.workers.dev/
 ```
 
-There are no `routes` or `custom_domain` entries. Adding either can disable or redirect the existing workers.dev deployment.
+## Dashboard Git Build settings
 
-## Deploy locally on Windows
+```text
+Build command: npm run build:windows
+Deploy command: npm run deploy
+Non-production deploy command: npm run preview:cloudflare
+Root directory: /
+```
+
+## Command-line deployment
 
 ```powershell
-$env:CLOUDFLARE_ACCOUNT_ID = "YOUR_ACCOUNT_ID"
 npm ci
 npm test
+npm run build:windows
 npm run deploy
-$env:RML_BASE_URL = "https://resalewebsite.unusualsuspectsclothing.workers.dev"
 npm run check:production
 ```
 
-Or run `DEPLOY_PRODUCTION_WINDOWS.bat`.
+`wrangler.jsonc` has:
 
-## Verify production
+- `name: resalewebsite`
+- `workers_dev: true`
+- no custom-domain routes
+- no Browser Run binding
+- `RML_MARKETPLACE_TRANSPORT=browser`
 
-```powershell
-curl.exe -i "https://resalewebsite.unusualsuspectsclothing.workers.dev/api/health"
-curl.exe -i "https://resalewebsite.unusualsuspectsclothing.workers.dev/api/listings?marketplace=Depop&q=raf%20simons&page=0&mode=active"
-```
+Marketplace requests are made by the website in the user's browser. `/api/listings`, `/api/web-listings`, and `/api/image-proxy` are disabled and return HTTP 410 so old cached clients cannot accidentally restart Worker scraping.
 
-The health endpoint should contain:
+## Browser Bridge
 
-```json
-{
-  "revision": "depop-production-results-images-v6",
-  "browserBindingAvailable": true
-}
-```
-
-If the homepage updates but `/api/health` is missing, the Git integration is deploying static assets or using the wrong deploy command. Set the deploy command to `npm run deploy`.
+Install the optional unpacked extension from `browser-extension/` for marketplaces that block ordinary cross-origin browser requests.

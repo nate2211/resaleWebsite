@@ -33,6 +33,10 @@ import type { EngagementReport } from "./lib/engagement";
 import { APPAREL_TYPES, inferApparelType, type ApparelFilter } from "./lib/apparel";
 import type { WatchStatusReport, WatchListingState } from "./lib/watch-status";
 import {
+  searchAiWebFrontend,
+  searchMarketplaceFrontend,
+} from "./lib/frontend-marketplaces";
+import {
   applyModelListingReview,
   finalizeAuthenticityAssessment,
   finalizeEngagementAssessment,
@@ -167,14 +171,16 @@ const FALLBACK_IMAGE = "/listing-placeholder.svg";
 
 function listingImageSource(listing: Listing) {
   if (!listing.image) return FALLBACK_IMAGE;
-  if (listing.marketplace !== "Depop") return listing.image;
   try {
-    const url = new URL(listing.image);
-    const host = url.hostname.toLowerCase();
-    if (host === "media-photos.depop.com" || host.endsWith(".media-photos.depop.com")
-      || (/^(?:images|photos|media)\./.test(host) && host.endsWith(".depop.com"))) {
-      return `/api/image-proxy?url=${encodeURIComponent(url.toString())}`;
+    const base = typeof window !== "undefined"
+      ? window.location.origin
+      : "https://resalewebsite.unusualsuspectsclothing.workers.dev";
+    const url = new URL(listing.image, base);
+    const lower = `${url.hostname}${url.pathname}`.toLowerCase();
+    if (/favicon|\.ico(?:$|\?)|logo|sprite|duckduckgo\.com\/ip3\//.test(lower)) {
+      return FALLBACK_IMAGE;
     }
+    if (url.protocol === "http:" || url.protocol === "https:") return url.toString();
   } catch { /* use placeholder below */ }
   return FALLBACK_IMAGE;
 }
@@ -452,14 +458,7 @@ function ProductImage({
       decoding="async"
       referrerPolicy="no-referrer"
       onError={(event) => {
-        const image = event.currentTarget;
-        if (listing.marketplace === "Depop" && listing.image
-          && image.src.includes("/api/image-proxy") && image.dataset.directRetry !== "1") {
-          image.dataset.directRetry = "1";
-          image.src = listing.image;
-          return;
-        }
-        image.src = FALLBACK_IMAGE;
+        event.currentTarget.src = FALLBACK_IMAGE;
       }}
     />
   );
@@ -2009,15 +2008,12 @@ function ListingInspector({
 
     Promise.allSettled(queries.map(async (query) => {
       const pageAttempts = await Promise.allSettled([0, 1].map(async (page) => {
-        const params = new URLSearchParams({
-          marketplace: "Grailed", mode: "sold", q: query,
-          category: "All", page: String(page),
+        const value = await searchMarketplaceFrontend({
+          marketplace: "Grailed",
+          query,
+          page,
+          mode: "sold",
         });
-        const value = await fetchApiJson<{ listings?: Partial<Listing>[] }>(
-          `/api/listings?${params}`,
-          undefined,
-          "Grailed sold inspection",
-        );
         return Array.isArray(value.listings) ? value.listings : [];
       }));
       const batches = pageAttempts.flatMap((attempt) =>
@@ -2085,18 +2081,17 @@ function ListingInspector({
     const fetchBatch = async (
       marketplace: Marketplace,
       mode: "active" | "sold",
-      query: string,
+      batchQuery: string,
       page: number,
     ) => {
-      const params = new URLSearchParams({
-        marketplace, mode, q: query, category: "All", page: String(page),
-      });
       try {
-        const value = await fetchApiJson<{ listings?: Partial<Listing>[] }>(
-          `/api/listings?${params}`,
-          { signal: controller.signal },
-          `${marketplace} ${mode} inspection`,
-        );
+        const value = await searchMarketplaceFrontend({
+          marketplace,
+          query: batchQuery,
+          page,
+          mode,
+          signal: controller.signal,
+        });
         return Array.isArray(value.listings) ? value.listings : [];
       } catch {
         return [];
@@ -3155,40 +3150,27 @@ function BrowseView({
 
     let plannedQueries = [searchTerm];
     let planningNote = modelReady
-      ? "AI-enhanced public-web listing search."
-      : "Public-web listing search using your exact query.";
+      ? "AI-enhanced browser-side web search."
+      : "Browser-side web search using your exact query.";
     if (modelReady && aiEngine) {
       try {
         const plan = await aiEngine.planResearch(
-          `Find active sale listings for ${searchTerm} across public resale marketplaces and fashion stores. ` +
-          `Prefer individual product or listing pages with visible prices, dates, and original source links.`,
+          `Find active sale listings for ${searchTerm} across public secondhand marketplaces and fashion stores. ` +
+          `Prefer eBay, Mercari US, Facebook Marketplace, and individual product pages with visible prices.`,
         );
         plannedQueries = [...new Set([...plan.searchQueries, ...plan.webQueries, searchTerm])].slice(0, 5);
         planningNote = plan.note;
         setAiSearchQueries(plan.searchQueries.slice(0, 4));
       } catch {
-        // The guarded server reader still searches with the literal query.
+        // Continue with the exact query in the browser.
       }
     }
 
-    const value = await fetchApiJson<{
-      error?: string;
-      searches?: string[];
-      discoveredCount?: number;
-      listings?: Partial<Listing>[];
-      browserBindingAvailable?: boolean;
-      discoveryMode?: string;
-      targetedSecondhandSources?: string[];
-    }>("/api/web-listings", {
-      method: "POST",
+    const value = await searchAiWebFrontend({
+      query: searchTerm,
+      queries: plannedQueries,
       signal: controller.signal,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        query: searchTerm,
-        queries: plannedQueries,
-      }),
-    }, "AI Search");
-    if (value.error) throw new Error(value.error);
+    });
     const listings = (value.listings ?? []).map((item) => {
       const inferred = inferMarketplace(item.url || "");
       const marketplace = MARKETPLACES.includes(item.marketplace as Marketplace)
@@ -3202,8 +3184,8 @@ function BrowseView({
       searches: value.searches ?? plannedQueries,
       searchTerm,
       message: listings.length
-        ? `${planningNote} ${value.discoveryMode || "Public web discovery"} read ${listings.length} priced listing page${listings.length === 1 ? "" : "s"} from ${sourceCount} source${sourceCount === 1 ? "" : "s"}, including targeted secondhand markets when public results were available.`
-        : `Search found ${value.discoveredCount ?? 0} public candidate pages across ${(value.targetedSecondhandSources ?? ["eBay", "Mercari US", "Facebook Marketplace"]).join(", ")} and other outside stores, but none exposed a readable product price.${value.browserBindingAvailable === false ? " Deploy with the remote BROWSER binding to render JavaScript-heavy stores." : ""}`,
+        ? `${planningNote} ${value.discoveryMode} found ${listings.length} listing page${listings.length === 1 ? "" : "s"} from ${sourceCount} outside source${sourceCount === 1 ? "" : "s"}.`
+        : `The browser found ${value.discoveredCount ?? 0} candidate pages across ${(value.targetedSecondhandSources ?? ["eBay", "Mercari US", "Facebook Marketplace"]).join(", ")}, but none exposed readable listing data. Install the included browser bridge when those sites block cross-origin reads.`,
     };
   }
 
@@ -3224,9 +3206,6 @@ function BrowseView({
       (internationalMarketsOpen || !MARKETPLACE_INFO[marketplace].sourcingOnly) &&
       (!loadMore || Boolean(currentLiveState.find((entry) =>
         entry.marketplace === marketplace && entry.hasMore))),
-    );
-    const zenMarketSelections = requestMarkets.filter((marketplace) =>
-      ["JDirectItems Auction", "Rakuten", "Rakuten Rakuma"].includes(marketplace),
     );
     if (!requestMarkets.length && !includeAiSearch) {
       setMarketSelectionMessage("Select at least one marketplace before loading listings.");
@@ -3257,7 +3236,7 @@ function BrowseView({
       ...entry,
       status: requestMarkets.includes(entry.marketplace) ? "loading" : "idle",
       message: requestMarkets.includes(entry.marketplace)
-        ? "Discovering and inspecting public listings…"
+        ? "Requesting public listings from this browser…"
         : "Not selected for this scan.",
     })));
 
@@ -3271,31 +3250,15 @@ function BrowseView({
         )].slice(0, 4);
 
         const attempts = await settleInBatches(queries, 2, async (plannedQuery) => {
-          const params = new URLSearchParams({
+          return searchMarketplaceFrontend({
             marketplace,
-            q: plannedQuery,
-            category,
-            page: String(requestedPage),
+            query: [plannedQuery, category === "All clothing" ? "" : category].filter(Boolean).join(" "),
+            page: requestedPage,
+            signal: controller.signal,
           });
-          const zenMarketIndex = zenMarketSelections.indexOf(marketplace);
-          if (zenMarketIndex >= 0) {
-            params.set("provider", "zenmarket");
-            params.set("providerBatchSize", String(zenMarketSelections.length));
-            params.set("providerBatchIndex", String(zenMarketIndex + 1));
-          }
-          return fetchApiJson<{
-            status?: LiveState["status"];
-            message?: string;
-            sourceUrl?: string;
-            listings?: Partial<Listing>[];
-            hasMore?: boolean;
-          }>(`/api/listings?${params}`, { signal: controller.signal },
-            zenMarketIndex >= 0
-              ? `${marketplace} via ZenMarket ${zenMarketIndex + 1}/${zenMarketSelections.length}`
-              : `${marketplace} search`);
         });
 
-        const values = attempts.flatMap((attempt) =>
+        const values: Awaited<ReturnType<typeof searchMarketplaceFrontend>>[] = attempts.flatMap((attempt) =>
           attempt.status === "fulfilled" ? [attempt.value] : [],
         );
         const failures = attempts.flatMap((attempt) =>
@@ -3313,7 +3276,7 @@ function BrowseView({
           };
         }
 
-        const first = values[0] ?? {};
+        const first = values[0];
         const mergedListings = [...new Map(values
           .flatMap((entry) => Array.isArray(entry.listings) ? entry.listings : [])
           .filter((listing): listing is Partial<Listing> => Boolean(listing) && typeof listing === "object")
@@ -3739,7 +3702,7 @@ function BrowseView({
         >
           <span>
             <strong>International Markets</strong>
-            <small>Five international sources plus AI Search. No requests run while this section is closed.</small>
+            <small>Five international sources plus AI Search. Requests run in your browser; Cloudflare does not fetch marketplace pages.</small>
           </span>
           <b aria-hidden="true">{internationalMarketsOpen ? "−" : "+"}</b>
         </button>
@@ -3786,7 +3749,7 @@ function BrowseView({
                     Include
                   </label>
                 </div>
-                <p>Search public secondhand listings on eBay, Mercari US, Facebook Marketplace, and other resale sites not built into ResaleMasterLab.</p>
+                <p>Search public secondhand listings on eBay, Mercari US, Facebook Marketplace, and other resale sites from your browser. Install the included Browser Bridge when a site blocks CORS.</p>
                 <label className="ai-market-search-field">
                   <span aria-hidden="true">⌕</span>
                   <input
@@ -3817,8 +3780,8 @@ function BrowseView({
                     {loading && webSearchState === "loading" ? "Searching…" : "Run AI Search"}
                   </button>
                   <small>{modelReady
-                    ? "AI web browsing + eBay/Mercari US/Facebook + selected markets + Rakuten"
-                    : "Exact-query secondhand discovery + selected markets + Rakuten"}</small>
+                    ? "Local AI query planning + browser web discovery + selected markets + Rakuten"
+                    : "Browser-side secondhand discovery + selected markets + Rakuten"}</small>
                 </div>
               </article>
             </section>
@@ -4875,24 +4838,23 @@ Finish with NOTE: one short explanation. Do not return anything else.`,
     ]);
     setModelProgress(`Searching ${intent.source} for ${intent.query}…`);
     try {
-      const marketRequest = async (marketplace: Marketplace, query: string, mode = "active", page = 0) => {
-        const params = new URLSearchParams({
-          marketplace, q: query.slice(0, 100), category: "All", page: String(page), mode,
+      const marketRequest = async (marketplace: Marketplace, plannedQuery: string, _mode = "active", page = 0) => {
+        const value = await searchMarketplaceFrontend({
+          marketplace,
+          query: plannedQuery.slice(0, 100),
+          page,
         });
-        const value = await fetchApiJson<{
-          listings?: Partial<Listing>[]; sourceUrl?: string; message?: string;
-          diagnostics?: {
-            grailedPageCards?: number;
-            grailedPublicSearch?: number;
-            discoveredUrls?: number;
-            hydratedCards?: number;
-          };
-        }>(`/api/listings?${params}`, undefined, `${marketplace} assistant ${mode} search`);
         return {
-          listings: (value.listings ?? []).map((item) => apiListing(item, marketplace, query)),
-          sourceUrl: value.sourceUrl || MARKETPLACE_INFO[marketplace].search(query),
+          listings: (value.listings ?? []).map((item) => apiListing(item, marketplace, plannedQuery)),
+          sourceUrl: value.sourceUrl || MARKETPLACE_INFO[marketplace].search(plannedQuery),
           message: value.message || "",
-          diagnostics: value.diagnostics,
+          diagnostics: {
+            grailedPageCards: 0,
+            grailedPublicSearch: 0,
+            discoveredUrls: value.listings.length,
+            hydratedCards: value.listings.length,
+            transport: value.diagnostics.transport,
+          },
         };
       };
 

@@ -1,0 +1,42 @@
+{
+  "manifest_version": 3,
+  "name": "ResaleMasterLab Browser Bridge",
+  "version": "1.0.0",
+  "description": "Lets ResaleMasterLab read public marketplace pages from your browser without using Cloudflare marketplace functions.",
+  "permissions": ["storage"],
+  "host_permissions": [
+    "https://www.depop.com/*",
+    "https://webapi.depop.com/*",
+    "https://www.grailed.com/*",
+    "https://poshmark.com/*",
+    "https://jp.mercari.com/*",
+    "https://zenmarket.jp/*",
+    "https://search.rakuten.co.jp/*",
+    "https://item.rakuten.co.jp/*",
+    "https://fril.jp/*",
+    "https://globalbunjang.com/*",
+    "https://www.ebay.com/*",
+    "https://www.mercari.com/*",
+    "https://www.facebook.com/marketplace/*",
+    "https://r.jina.ai/*",
+    "https://s.jina.ai/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://resalewebsite.unusualsuspectsclothing.workers.dev/*",
+        "http://localhost/*",
+        "http://127.0.0.1/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_start"
+    }
+  ],
+  "action": {
+    "default_title": "ResaleMasterLab Browser Bridge"
+  }
+}

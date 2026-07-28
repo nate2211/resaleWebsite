@@ -13,10 +13,10 @@
     "binding": "ASSETS",
     "not_found_handling": "none"
   },
-  "browser": {
-    "binding": "BROWSER"
-  },
   "observability": {
     "enabled": true
+  },
+  "vars": {
+    "RML_MARKETPLACE_TRANSPORT": "browser"
   }
 }
