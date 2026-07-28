@@ -478,7 +478,7 @@ same-origin `/api/*` marketplace route.
 5. Deploy the full-stack Worker, API routes, client assets, and Browser Run
    binding with `npm run deploy`. Use `npm run deploy:static` only for a
    deliberately frontend-only release.
-6. Attach the custom domain in Cloudflare and verify that `/robots.txt`,
+6. Attach the workers.dev deployment in Cloudflare and verify that `/robots.txt`,
    `/sitemap.xml`, `/manifest.webmanifest`, `/about`, `/methodology`, `/faq`,
    `/contact`, `/accessibility`, `/privacy`, and `/terms` return successfully on
    the production domain.
@@ -508,6 +508,6 @@ A normal Vinext App Router build produces Worker, RSC, SSR, client JavaScript, a
 ## Verify the production domain
 
 After `npm run deploy`, run `npm run check:production`. The `/api/health`
-response must report revision `depop-domain-production-v3` and
-`browserBindingAvailable: true`. This also verifies that the custom domain is
+response must report revision `depop-workers-dev-production-v4` and
+`browserBindingAvailable: true`. This also verifies that the workers.dev deployment is
 serving the full-stack Worker rather than an older or assets-only deployment.

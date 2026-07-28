@@ -1,22 +1,14 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "resalemasterlab",
+  "name": "resalewebsite",
   "main": "vinext/server/app-router-entry",
   "compatibility_date": "2026-07-28",
-  "compatibility_flags": ["nodejs_compat"],
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
   "workers_dev": true,
   "preview_urls": true,
   "upload_source_maps": true,
-  "routes": [
-    {
-      "pattern": "resalemasterlab.com",
-      "custom_domain": true
-    },
-    {
-      "pattern": "www.resalemasterlab.com",
-      "custom_domain": true
-    }
-  ],
   "assets": {
     "binding": "ASSETS",
     "not_found_handling": "none"

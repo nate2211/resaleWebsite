@@ -126,7 +126,9 @@ test("uses Vinext routing and Cloudflare Browser Run only as a zero-card fallbac
   assert.match(route, /runtime\.env/);
   assert.match(wrangler, /"browser"\s*:/);
   assert.match(wrangler, /"binding"\s*:\s*"BROWSER"/);
-  assert.match(wrangler, /"custom_domain"\s*:\s*true/);
+  assert.match(wrangler, /"name"\s*:\s*"resalewebsite"/);
+  assert.match(wrangler, /"workers_dev"\s*:\s*true/);
+  assert.doesNotMatch(wrangler, /"custom_domain"\s*:/);
   assert.match(packageJson, /@vinext\/cloudflare deploy --config wrangler\.jsonc/);
   assert.match(route, /browserIndexedDepopItems/);
   assert.match(packageJson, /vinext dev -p 5173 -H 0\.0\.0\.0/);

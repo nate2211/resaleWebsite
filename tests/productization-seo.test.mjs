@@ -36,7 +36,7 @@ test("packages crawlable public pages and Google-facing metadata", async () => {
   assert.match(robots, /sitemap/);
   assert.match(manifest, /icon-maskable-512\.png/);
   assert.match(faq, /FAQPage/);
-  assert.match(wrangler, /name = "resalemasterlab-static"/);
+  assert.match(wrangler, /name = "resalewebsite-static-preview"/);
   assert.match(wrangler, /compatibility_date = "2026-07-28"/);
   assert.match(wrangler, /directory = "\.\/build"/);
   assert.match(wrangler, /not_found_handling = "single-page-application"/);

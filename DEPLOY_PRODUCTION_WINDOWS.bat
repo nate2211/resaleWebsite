@@ -18,12 +18,14 @@ echo [4/5] Deploying the full-stack Vinext Worker with Browser Run...
 call npm run deploy
 if errorlevel 1 goto :fail
 
-echo [5/5] Checking the custom domain, Worker revision, Browser binding, and Depop listings...
+set "RML_BASE_URL=https://resalewebsite.unusualsuspectsclothing.workers.dev"
+
+echo [5/5] Checking the workers.dev deployment, Worker revision, Browser binding, and Depop listings...
 call npm run check:production
 if errorlevel 1 goto :fail
 
 echo.
-echo Production deployment verified successfully.
+echo Production deployment verified successfully at https://resalewebsite.unusualsuspectsclothing.workers.dev.
 exit /b 0
 
 :fail

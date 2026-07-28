@@ -32,7 +32,12 @@ if (!faq.includes("FAQPage") || !faq.includes("International Markets")) {
   throw new Error("The public FAQ must include structured FAQ data and current marketplaces.");
 }
 const productionConfig = readFileSync("wrangler.jsonc", "utf8");
-for (const token of ["resalemasterlab.com", '"custom_domain": true', '"binding": "BROWSER"', '"main": "vinext/server/app-router-entry"']) {
+for (const token of [
+  '"name": "resalewebsite"',
+  '"workers_dev": true',
+  '"binding": "BROWSER"',
+  '"main": "vinext/server/app-router-entry"',
+]) {
   if (!productionConfig.includes(token)) throw new Error(`Production Wrangler config is missing ${token}`);
 }
 console.log("SEO and full-stack Cloudflare deployment files are present.");

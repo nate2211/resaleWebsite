@@ -2,7 +2,7 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 const configuredSiteUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim();
-const siteUrl = configuredSiteUrl || "https://resalemasterlab.com";
+const siteUrl = configuredSiteUrl || "https://resalewebsite.unusualsuspectsclothing.workers.dev";
 
 export const metadata: Metadata = {
   metadataBase: configuredSiteUrl ? new URL(configuredSiteUrl) : undefined,

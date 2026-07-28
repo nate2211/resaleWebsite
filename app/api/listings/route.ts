@@ -5,7 +5,7 @@ import { normalizePublicListingRecord, priceFromPublicText } from "../../lib/pub
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
-const WORKER_REVISION = "depop-domain-production-v3";
+const WORKER_REVISION = "depop-workers-dev-production-v4";
 
 type Marketplace =
   | "Depop" | "Grailed" | "Poshmark" | "Mercari Japan"

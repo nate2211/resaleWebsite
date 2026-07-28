@@ -1,4 +1,4 @@
-const base = (process.env.RML_BASE_URL || "https://resalemasterlab.com").replace(/\/$/, "");
+const base = (process.env.RML_BASE_URL || "https://resalewebsite.unusualsuspectsclothing.workers.dev").replace(/\/$/, "");
 const query = process.env.RML_DEPOP_QUERY || "raf simons";
 
 async function readJson(path, timeoutMs = 90000) {
@@ -20,7 +20,7 @@ async function readJson(path, timeoutMs = 90000) {
 }
 
 const health = await readJson("/api/health", 30000);
-if (health.body.revision !== "depop-domain-production-v3") {
+if (health.body.revision !== "depop-workers-dev-production-v4") {
   throw new Error(`The domain is serving an older Worker revision: ${health.body.revision || "unknown"}`);
 }
 if (!health.body.browserBindingAvailable) {
