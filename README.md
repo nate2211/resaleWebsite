@@ -1,4 +1,15 @@
-# ResaleMasterLab production tools v13
+# ResaleMasterLab production navigation and marketplace v14
+
+This release keeps every v13 production feature and adds a complete responsive navigation bar on every page, official Depop and ZenMarket Mercari page-source recovery, and bounded all-market search orchestration.
+
+## v14 changes
+
+- Full navigation links on the workspace, public pages, Thrift Check, Listing Template, and the 404 page.
+- Desktop navigation stays visible; smaller screens use a three-bar button and accessible dropdown.
+- Depop uses its normal `search`, `brands`, `theme`, and `/products/` page sources, including embedded React/JSON records and `media-photos.depop.com` images.
+- Mercari Japan uses ZenMarket's normal Mercari tab, cross-site `stores=27` query, and `mercariproduct.aspx?itemCode=...` listing pages.
+- A single Search All action includes every selected marketplace but limits marketplace groups to three and raw relay requests to four at a time.
+- When six or more marketplaces are selected, query expansions are reduced and processed sequentially per marketplace to avoid Worker and upstream request spikes.
 
 Production domain: `https://resalemasterlab.cloud-cord.com`
 

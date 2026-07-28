@@ -466,6 +466,7 @@ function ProductImage({
 
 export default function Home() {
   const [view, setView] = useState<View>("research");
+  const [workspaceNavOpen, setWorkspaceNavOpen] = useState(false);
   const [listings, setListings] = useState<Listing[]>([]);
   const [selectedId, setSelectedId] = useState("");
   const [watchlist, setWatchlist] = useState<string[]>([]);
@@ -1443,33 +1444,53 @@ export default function Home() {
         </button>
       </header>
 
-      <nav className="subnav" aria-label="ResaleMasterLab sections">
-        {VIEWS.map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            className={view === item.id ? "active" : ""}
-            onClick={() => setView(item.id)}
-          >
-            {item.label}
-            {item.id === "watchlist" && monitoredListings.length > 0 && (
-              <span className="nav-count">{monitoredListings.length}</span>
-            )}
-            {item.id === "compare" && compareIds.length > 0 && (
-              <span className="nav-count">{compareIds.length}</span>
-            )}
-          </button>
-        ))}
-        <a className="feature-nav-link" href="/thrift-check">Thrift Check</a>
-        <a className="feature-nav-link" href="/listing-template">Listing Template</a>
-        <div className="subnav-spacer" />
+      <nav className={`subnav ${workspaceNavOpen ? "menu-open" : ""}`} aria-label="ResaleMasterLab sections">
         <button
+          className="subnav-menu-toggle"
           type="button"
-          className="settings-link"
-          onClick={() => setSettingsOpen(true)}
+          aria-label={workspaceNavOpen ? "Close navigation menu" : "Open navigation menu"}
+          aria-expanded={workspaceNavOpen}
+          aria-controls="workspace-navigation-links"
+          onClick={() => setWorkspaceNavOpen((value) => !value)}
         >
-          Analysis settings
+          <span className="subnav-bars" aria-hidden="true"><i /><i /><i /></span>
+          <span>{VIEWS.find((item) => item.id === view)?.label || "Menu"}</span>
         </button>
+        <div className="subnav-menu" id="workspace-navigation-links">
+          {VIEWS.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className={view === item.id ? "active" : ""}
+              onClick={() => { setView(item.id); setWorkspaceNavOpen(false); }}
+            >
+              {item.label}
+              {item.id === "watchlist" && monitoredListings.length > 0 && (
+                <span className="nav-count">{monitoredListings.length}</span>
+              )}
+              {item.id === "compare" && compareIds.length > 0 && (
+                <span className="nav-count">{compareIds.length}</span>
+              )}
+            </button>
+          ))}
+          <a href="/thrift-check">Thrift Check</a>
+          <a href="/listing-template">Listing Template</a>
+          <a href="/methodology">Methodology</a>
+          <a href="/about">About</a>
+          <a href="/faq">FAQ</a>
+          <a href="/contact">Contact</a>
+          <a href="/accessibility">Accessibility</a>
+          <a href="/privacy">Privacy</a>
+          <a href="/terms">Terms</a>
+          <div className="subnav-spacer" />
+          <button
+            type="button"
+            className="settings-link"
+            onClick={() => { setSettingsOpen(true); setWorkspaceNavOpen(false); }}
+          >
+            Analysis settings
+          </button>
+        </div>
       </nav>
 
       <section className="product-intro" aria-labelledby="product-intro-title">
@@ -3255,15 +3276,15 @@ function BrowseView({
     })));
 
     try {
-      const selectedResponsesPromise = Promise.allSettled(requestMarkets.map(async (marketplace) => {
+      const selectedResponsesPromise = settleInBatches(requestMarkets, 3, async (marketplace) => {
         const literalQuery = query.trim() || (category === "All clothing" ? "clothing" : category);
         const queries = [...new Set(
           [literalQuery, ...aiSearchQueries]
             .map((value) => value.trim())
             .filter(Boolean),
-        )].slice(0, 4);
+        )].slice(0, requestMarkets.length >= 6 ? 2 : 4);
 
-        const attempts = await settleInBatches(queries, 2, async (plannedQuery) => {
+        const attempts = await settleInBatches(queries, requestMarkets.length >= 6 ? 1 : 2, async (plannedQuery) => {
           return searchMarketplaceFrontend({
             marketplace,
             query: [plannedQuery, category === "All clothing" ? "" : category].filter(Boolean).join(" "),
@@ -3315,7 +3336,7 @@ function BrowseView({
           listings: mergedListings,
           hasMore: values.some((entry) => Boolean(entry.hasMore)),
         };
-      })).then((attempts) => attempts.map((attempt, index) => {
+      }).then((attempts) => attempts.map((attempt, index) => {
         if (attempt.status === "fulfilled") return attempt.value;
         const marketplace = requestMarkets[index];
         return {
@@ -3686,6 +3707,31 @@ function BrowseView({
         {marketSelectionMessage && hasSelectedRequestMarkets && (
           <p className="market-selection-warning" role="status">{marketSelectionMessage}</p>
         )}
+        <div className="market-selection-actions" aria-label="Marketplace selection actions">
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={() => {
+              setSelectedMarkets([...MARKETPLACES]);
+              setInternationalSection(true);
+              setMarketSelectionMessage("All supported marketplaces are selected. The scan will use bounded concurrency.");
+            }}
+          >
+            Select all markets
+          </button>
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={() => {
+              setSelectedMarkets([]);
+              setAiWebSearchSelected(false);
+              setMarketSelectionMessage("Marketplace selection cleared.");
+            }}
+          >
+            Clear selection
+          </button>
+          <small>One search action covers every selected market; requests are queued in small groups to prevent overload.</small>
+        </div>
         <div className="query-options">
           <span>Default marketplaces</span>
           {RESALE_MARKETPLACES.map((marketplace) => (
@@ -3716,7 +3762,7 @@ function BrowseView({
         >
           <span>
             <strong>International Markets</strong>
-            <small>Five international sources plus AI Search. Requests run in your browser; Cloudflare does not fetch marketplace pages.</small>
+            <small>Five international sources plus AI Search. Official page-source requests use a bounded relay and all parsing happens in your browser.</small>
           </span>
           <b aria-hidden="true">{internationalMarketsOpen ? "−" : "+"}</b>
         </button>
@@ -3763,7 +3809,7 @@ function BrowseView({
                     Include
                   </label>
                 </div>
-                <p>Search public secondhand listings through the lightweight frontend marketplace-results API. Parsing and comparisons stay in your browser; the included Browser Bridge remains an optional fallback.</p>
+                <p>Search public secondhand listings through the bounded marketplace-results relay. Parsing and comparisons stay in your browser; the included Browser Bridge remains an optional fallback.</p>
                 <label className="ai-market-search-field">
                   <span aria-hidden="true">⌕</span>
                   <input

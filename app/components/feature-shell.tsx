@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { SiteNavigation } from "./site-navigation";
 
 export function FeatureShell({
   current,
@@ -15,18 +16,7 @@ export function FeatureShell({
 }) {
   return (
     <main className="feature-shell">
-      <header className="feature-topbar">
-        <a className="brand" href="/" aria-label="ResaleMasterLab home">
-          <span className="brand-mark">R</span>
-          <span>ResaleMasterLab</span>
-        </a>
-        <nav className="feature-nav" aria-label="ResaleMasterLab tools">
-          <a href="/">Research</a>
-          <a className={current === "thrift-check" ? "active" : ""} href="/thrift-check">Thrift Check</a>
-          <a className={current === "listing-template" ? "active" : ""} href="/listing-template">Listing Template</a>
-          <a href="/methodology">Methodology</a>
-        </nav>
-      </header>
+      <SiteNavigation currentPath={current === "thrift-check" ? "/thrift-check" : "/listing-template"} />
       <section className="feature-hero">
         <p className="eyebrow">{eyebrow}</p>
         <h1>{title}</h1>

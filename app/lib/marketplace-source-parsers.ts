@@ -98,7 +98,6 @@ export function parseDepopReaderMarkdown(source: string): DepopReaderRecord[] {
     const end = nextItemMarker(text, matchIndex + match[0].length);
     const block = text.slice(start, end);
     const image = bestDepopImage(block);
-    if (!image) continue;
 
     const title = cleanText(
       block.match(/!\[(?:Image\s+\d+:\s*)?([^\]]{3,320})\]\(https:\/\/media-photos\.depop\.com\//i)?.[1]

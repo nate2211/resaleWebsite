@@ -67,6 +67,26 @@ const BRIDGE_TIMEOUT_MS = 18_000;
 const DIRECT_TIMEOUT_MS = 12_000;
 const READER_TIMEOUT_MS = 20_000;
 const JINA_KEY_STORAGE = "rml:jina-reader-key";
+const MARKETPLACE_RELAY_CONCURRENCY = 4;
+let marketplaceRelayActive = 0;
+const marketplaceRelayQueue: Array<() => void> = [];
+
+async function withMarketplaceRelaySlot<T>(work: () => Promise<T>): Promise<T> {
+  await new Promise<void>((resolve) => {
+    const start = () => {
+      marketplaceRelayActive += 1;
+      resolve();
+    };
+    if (marketplaceRelayActive < MARKETPLACE_RELAY_CONCURRENCY) start();
+    else marketplaceRelayQueue.push(start);
+  });
+  try {
+    return await work();
+  } finally {
+    marketplaceRelayActive = Math.max(0, marketplaceRelayActive - 1);
+    marketplaceRelayQueue.shift()?.();
+  }
+}
 
 const CORS_BLOCKED_MARKETPLACE_HOSTS = [
   "depop.com",
@@ -170,8 +190,10 @@ export function frontendMarketplaceUrls(
   if (marketplace === "Poshmark") return [`https://poshmark.com/search?query=${q}&type=listings&src=ac&page=${p}`];
   if (marketplace === "Mercari Japan") {
     return [
-      `https://zenmarket.jp/en/search.aspx?q=${q}&p=${p}&searchMode=custom&stores=27`,
+      // ZenMarket's normal Mercari tab and its cross-site store filter are both
+      // requested because either page may expose the listing source first.
       `https://zenmarket.jp/en/mercari.aspx?q=${q}&p=${p}`,
+      `https://zenmarket.jp/en/search.aspx?q=${q}&p=${p}&searchMode=custom&stores=27`,
     ];
   }
   if (marketplace === "JDirectItems Auction") return [
@@ -208,8 +230,9 @@ function mergeAbortSignals(primary: AbortSignal | undefined, timeoutMs: number) 
 
 
 async function frontendApiFetchText(url: string, signal?: AbortSignal): Promise<TextResponse> {
-  const merged = mergeAbortSignals(signal, DIRECT_TIMEOUT_MS + 5_000);
-  try {
+  return withMarketplaceRelaySlot(async () => {
+    const merged = mergeAbortSignals(signal, DIRECT_TIMEOUT_MS + 5_000);
+    try {
     const response = await fetch(`/api/listings?source=${encodeURIComponent(url)}`, {
       method: "GET",
       credentials: "same-origin",
@@ -237,9 +260,10 @@ async function frontendApiFetchText(url: string, signal?: AbortSignal): Promise<
       text,
       transport: "frontend-api",
     };
-  } finally {
-    merged.cleanup();
-  }
+    } finally {
+      merged.cleanup();
+    }
+  });
 }
 
 async function directFetchText(url: string, signal?: AbortSignal): Promise<TextResponse> {
@@ -572,13 +596,17 @@ function marketplaceRecordWithUrl(
   if (marketplace === "Grailed") {
     const slug = recordText(enriched, ["slug"]);
     enriched.url = `/listings/${id}${slug ? `-${slug.replace(new RegExp(`^${id}-?`), "")}` : ""}`;
-  } else if (marketplace === "Mercari Japan" && (storeId === "27" || /mercari/i.test(storeName))) {
-    enriched.url = `https://zenmarket.jp/en/mercari.aspx?itemCode=${encodeURIComponent(id)}`;
-  } else if (marketplace === "Rakuten" && (storeId === "0" || /rakuten/i.test(storeName))) {
+  } else if (marketplace === "Mercari Japan"
+    && (storeId === "27" || /mercari/i.test(storeName) || (!storeId && !storeName))) {
+    enriched.url = `https://zenmarket.jp/en/mercariproduct.aspx?itemCode=${encodeURIComponent(id)}`;
+  } else if (marketplace === "Rakuten"
+    && (storeId === "0" || /rakuten/i.test(storeName) || (!storeId && !storeName))) {
     enriched.url = `https://zenmarket.jp/en/rakutenproduct.aspx?itemCode=${encodeURIComponent(id)}`;
-  } else if (marketplace === "JDirectItems Auction" && (storeId === "28" || /auction|yahoo|jdirect/i.test(storeName))) {
+  } else if (marketplace === "JDirectItems Auction"
+    && (storeId === "28" || /auction|yahoo|jdirect/i.test(storeName) || (!storeId && !storeName))) {
     enriched.url = `https://zenmarket.jp/en/auction.aspx?itemCode=${encodeURIComponent(id)}`;
-  } else if (marketplace === "Rakuten Rakuma" && (storeId === "25" || /rakuma|fril/i.test(storeName))) {
+  } else if (marketplace === "Rakuten Rakuma"
+    && (storeId === "25" || /rakuma|fril/i.test(storeName) || (!storeId && !storeName))) {
     enriched.url = `https://zenmarket.jp/en/rakumaproduct.aspx?itemCode=${encodeURIComponent(id)}`;
   }
   return enriched;
@@ -610,15 +638,18 @@ function canonicalListingUrl(value: string, marketplace: Marketplace, base: stri
         && [...parsed.searchParams.keys()].some((key) => /item|code|id/i.test(key));
       if (!directMercari && !zenMarketMercari) return "";
       if (directMercari) parsed.search = "";
-    } else if (marketplace === "Rakuten") {
+    } else if (marketplace === "Rakuten"
+    && (storeId === "0" || /rakuten/i.test(storeName) || (!storeId && !storeName))) {
       const valid = (hostMatches("zenmarket.jp") && /rakutenproduct\.aspx/i.test(path))
         || (host === "item.rakuten.co.jp" && path.split("/").filter(Boolean).length >= 2);
       if (!valid) return "";
-    } else if (marketplace === "JDirectItems Auction") {
+    } else if (marketplace === "JDirectItems Auction"
+    && (storeId === "28" || /auction|yahoo|jdirect/i.test(storeName) || (!storeId && !storeName))) {
       const valid = (hostMatches("zenmarket.jp") && /(?:auction|yahoo).*\.aspx/i.test(path))
         || (hostMatches("auctions.yahoo.co.jp") && /\/auction\//i.test(path));
       if (!valid) return "";
-    } else if (marketplace === "Rakuten Rakuma") {
+    } else if (marketplace === "Rakuten Rakuma"
+    && (storeId === "25" || /rakuma|fril/i.test(storeName) || (!storeId && !storeName))) {
       const valid = (hostMatches("zenmarket.jp") && /rakuma.*\.aspx/i.test(path))
         || (host === "item.fril.jp" && path.length > 1)
         || (hostMatches("fril.jp") && /\/(?:shop|item)\//i.test(path));
@@ -792,6 +823,25 @@ function bestImageFromElement(root: Element, marketplace: Marketplace, base: str
   }
   for (const candidate of candidates.reverse()) {
     const image = marketplaceImage(candidate, marketplace, base);
+    if (image) return image;
+  }
+  return "";
+}
+
+function bestPublicImageFromElement(root: Element, base: string) {
+  const candidates: string[] = [];
+  for (const image of root.querySelectorAll("img")) {
+    const srcset = image.getAttribute("srcset") || image.getAttribute("data-srcset") || "";
+    candidates.push(...srcset.split(",").map((entry) => entry.trim().split(/\s+/)[0]).filter(Boolean));
+    candidates.push(
+      image.getAttribute("src") || "",
+      image.getAttribute("data-src") || "",
+      image.getAttribute("data-original") || "",
+      image.getAttribute("data-lazy-src") || "",
+    );
+  }
+  for (const candidate of candidates.reverse()) {
+    const image = safeImage(candidate, base);
     if (image) return image;
   }
   return "";
@@ -1004,6 +1054,12 @@ function parseResponse(response: TextResponse, marketplace: Marketplace) {
   const source = response.text.trim();
   if (!source) return [];
   const output: Partial<Listing>[] = [];
+  if (marketplace === "Depop") {
+    // Depop sometimes returns card markup in a readable/serialized form even
+    // when the response advertises HTML. Parse those cards before the generic
+    // DOM and embedded React-state passes.
+    output.push(...depopMarkdownListings(source, response.url));
+  }
   if (/json/i.test(response.contentType) || /^[\[{]/.test(source)) {
     try {
       output.push(...recordsFromJson(JSON.parse(source), marketplace, response.url));
@@ -1078,7 +1134,7 @@ async function hydrateListingPages(
   const candidates = listings.filter((listing) => listing.url && (
     !listing.image || Number(listing.price) <= 0 || !listing.description
     || listing.brand === "Unspecified" || listing.size === "Unknown"
-  )).slice(0, 8);
+  )).slice(0, 4);
   if (!candidates.length) return { listings, hydrated: 0, transports: [] as string[] };
 
   const updates = new Map<string, Partial<Listing>>();
@@ -1304,7 +1360,7 @@ export async function searchAiWebFrontend(input: {
           title: (anchor.getAttribute("title") || anchor.getAttribute("aria-label") || container.textContent || "Listing").replace(/\s+/g, " ").trim().slice(0, 300),
           url: href,
           description: (container.textContent || "").replace(/\s+/g, " ").trim().slice(0, 900),
-          image: bestImageFromElement(container, response.url),
+          image: bestPublicImageFromElement(container, response.url),
         });
       }
     }
@@ -1395,7 +1451,7 @@ export async function searchAiWebFrontend(input: {
     searches: queries,
     listings,
     discoveredCount: unique.length,
-    discoveryMode: "browser-side direct fetch + optional extension/Jina reader",
+    discoveryMode: "bounded official-page relay + browser parsing + optional extension/Jina reader",
     targetedSecondhandSources: targets.map((target) => target.name),
   };
 }

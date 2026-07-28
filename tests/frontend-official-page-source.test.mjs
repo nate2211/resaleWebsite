@@ -32,14 +32,14 @@ test("parses structured page state and hydrates only missing listing fields", as
   assert.match(client, /jsonPayloadsFromScript/);
   assert.match(client, /canonicalListingUrl/);
   assert.match(client, /hydrateListingPages/);
-  assert.match(client, /slice\(0, 8\)/);
+  assert.match(client, /slice\(0, 4\)/);
   assert.match(client, /length: Math\.min\(3, candidates\.length\)/);
   assert.match(client, /Promise\.allSettled\(workers\)/);
 });
 
 test("relay returns raw official page source with upstream metadata", async () => {
   const route = await source("app/api/listings/route.ts");
-  assert.match(route, /production-thrift-listing-v13/);
+  assert.match(route, /production-navigation-markets-v14/);
   assert.match(route, /x-rml-upstream-status/);
   assert.match(route, /x-rml-final-url/);
   assert.match(route, /x-rml-upstream-content-type/);

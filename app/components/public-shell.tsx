@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { SiteNavigation } from "./site-navigation";
 
 export function PublicShell({
   eyebrow,
@@ -13,24 +14,7 @@ export function PublicShell({
 }) {
   return (
     <main className="public-page-shell">
-      <header className="public-header">
-        <a className="public-brand" href="/" aria-label="ResaleMasterLab home">
-          <span>R</span>
-          <strong>ResaleMasterLab</strong>
-        </a>
-        <nav aria-label="Public pages">
-          <a href="/about">About</a>
-          <a href="/methodology">Methodology</a>
-          <a href="/faq">FAQ</a>
-          <a href="/contact">Contact</a>
-          <a href="/thrift-check">Thrift Check</a>
-          <a href="/listing-template">Listing Template</a>
-          <a href="/accessibility">Accessibility</a>
-          <a href="/privacy">Privacy</a>
-          <a href="/terms">Terms</a>
-          <a className="public-app-link" href="/">Open workspace</a>
-        </nav>
-      </header>
+      <SiteNavigation />
       <article className="public-content">
         <p className="public-eyebrow">{eyebrow}</p>
         <h1>{title}</h1>

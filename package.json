@@ -1,6 +1,6 @@
 {
   "name": "resalemasterlab",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
   "engines": {
     "node": ">=22.13.0"
@@ -56,5 +56,5 @@
     "wrangler": "4.92.0"
   },
   "type": "module",
-  "description": "ResaleMasterLab production resale research, Thrift Check, and private browser AI listing-template tools."
+  "description": "ResaleMasterLab production resale research with responsive navigation, bounded all-market search, Thrift Check, and private browser AI listing tools."
 }
