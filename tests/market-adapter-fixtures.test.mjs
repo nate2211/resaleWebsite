@@ -401,7 +401,7 @@ test("parses Depop, Mercari Japan, and Goofish cards and builds a Superbuy proxy
       async quickAction(action, options) {
         browserCalls.push({ action, options });
         if (action === "content" && String(options.url).includes("depop.com")) {
-          return new Response(`
+          const html = `
             <ol class="styles_productGrid__fixture">
               <li class="styles_listItem__fixture">
                 <a href="/products/public-supreme-box-logo-tee/" aria-label="Supreme Box Logo T-shirt">
@@ -412,7 +412,8 @@ test("parses Depop, Mercari Japan, and Goofish cards and builds a Superbuy proxy
                 <p class="styles_price__fixture">$120.00</p>
               </li>
             </ol>
-          `);
+          `;
+          return Response.json({ success: true, result: html });
         }
         if (action === "content" && String(options.url).includes("zenmarket.jp/en/yahoo.aspx")) {
           return new Response(`
@@ -470,10 +471,13 @@ test("parses Depop, Mercari Japan, and Goofish cards and builds a Superbuy proxy
           };</script>`);
         }
         if (action === "content") return new Response("<html><body><div id=app></div></body></html>");
-        return new Response(JSON.stringify([
-          "https://www.goofish.com/item?id=1060593587010",
-          "https://www.goofish.com/item?id=1060593587011",
-        ]), { headers: { "content-type": "application/json" } });
+        return Response.json({
+          success: true,
+          result: [
+            "https://www.goofish.com/item?id=1060593587010",
+            "https://www.goofish.com/item?id=1060593587011",
+          ],
+        });
       },
     };
 
@@ -560,6 +564,51 @@ test("parses Depop, Mercari Japan, and Goofish cards and builds a Superbuy proxy
     assert.equal(retryCalls[1].options.waitForTimeout, 10000);
     assert.equal("waitForSelector" in retryCalls[1].options, false);
     globalThis.__RML_BROWSER__ = regularBrowserFixture;
+
+    const depopLinkOnlyCalls = [];
+    globalThis.__RML_BROWSER__ = {
+      async quickAction(action, options) {
+        depopLinkOnlyCalls.push({ action, options });
+        const target = String(options.url);
+        if (action === "links") {
+          return Response.json({
+            success: true,
+            result: ["https://www.depop.com/products/production-link-only-jacket/"],
+          });
+        }
+        if (target.includes("/products/production-link-only-jacket/")) {
+          return Response.json({
+            success: true,
+            result: `<!doctype html><html><head>
+              <meta property="og:title" content="Production Link Only Depop Jacket | Depop">
+              <meta property="og:description" content="Supreme jacket in size L">
+              <meta property="og:image" content="https://media-photos.depop.com/link-only.jpg">
+              <meta property="product:price:amount" content="145.00">
+              <meta property="product:price:currency" content="USD">
+            </head><body></body></html>`,
+          });
+        }
+        return Response.json({ success: true, result: "<html><body><div id=app></div></body></html>" });
+      },
+    };
+    const linkOnly = await adapter.browserRenderedItems(
+      "Depop",
+      ["https://www.depop.com/search/?q=production-link-only&page=1"],
+    );
+    assert.equal(linkOnly.batches[0].items.length, 1, "Depop must recover canonical links from Browser Run");
+    const savedFetchForHydration = globalThis.fetch;
+    globalThis.fetch = async () => { throw new Error("fixture direct Depop product fetch blocked"); };
+    try {
+      const hydratedLinkOnly = await adapter.hydrate("Depop", linkOnly.batches[0].items[0]);
+      assert.equal(hydratedLinkOnly.price, 145);
+      assert.equal(hydratedLinkOnly.url, "https://www.depop.com/products/production-link-only-jacket/");
+      assert.match(hydratedLinkOnly.image, /link-only\.jpg/);
+      assert.ok(depopLinkOnlyCalls.some((call) => call.action === "links"));
+      assert.ok(depopLinkOnlyCalls.some((call) => String(call.options.url).includes("/products/production-link-only-jacket/")));
+    } finally {
+      globalThis.fetch = savedFetchForHydration;
+      globalThis.__RML_BROWSER__ = regularBrowserFixture;
+    }
 
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async () => { throw new Error("fixture direct fetch blocked"); };

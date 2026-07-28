@@ -445,6 +445,29 @@ nonstandard ports, or bypasses CAPTCHA/bot protection.
   Failed sources receive their own error status while successful listings and
   previously loaded pagination results remain visible.
 
+
+## Depop production rendering
+
+The production Depop adapter decodes Cloudflare Browser Run Quick Action
+responses before parsing them. Current Worker bindings wrap rendered HTML as
+`{ "success": true, "result": "<html>..." }`; the adapter extracts `result`
+while remaining compatible with raw-HTML local fixtures. If a rendered Depop
+search page exposes only product links, the adapter calls the Browser Run
+`links` action, keeps canonical `/products/` URLs, and renders the individual
+product page when an ordinary Worker fetch cannot recover a public price or
+image. A failed Depop source remains isolated from every other marketplace.
+
+Production Depop requires the full-stack deployment:
+
+```powershell
+npm ci
+npm test
+npm run deploy
+```
+
+Do not use `npm run deploy:static` for a release that needs Depop or any other
+same-origin `/api/*` marketplace route.
+
 ## Production deployment to Cloudflare
 
 1. Copy `.env.example` to `.env.production` and set `NEXT_PUBLIC_SITE_URL` to

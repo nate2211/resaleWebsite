@@ -288,6 +288,24 @@ async function browserRunBinding() {
   }
 }
 
+async function renderedContentBody(response: Response) {
+  if (!response.ok) return "";
+  const body = await response.text();
+  if (!body.trim()) return "";
+  try {
+    const decoded = JSON.parse(body) as unknown;
+    if (decoded && typeof decoded === "object" && !Array.isArray(decoded)) {
+      const envelope = decoded as { success?: boolean; result?: unknown };
+      if (envelope.success === false) return "";
+      if (typeof envelope.result === "string") return envelope.result.slice(0, MAX_RENDERED_BYTES);
+    }
+    return typeof decoded === "string" ? decoded.slice(0, MAX_RENDERED_BYTES) : "";
+  } catch {
+    // Preserve compatibility with raw-HTML test and older binding responses.
+    return body.slice(0, MAX_RENDERED_BYTES);
+  }
+}
+
 async function renderedHtml(url: string, waitForSelector?: string) {
   assertPublicHttpsUrl(url);
   const browser = await browserRunBinding();
@@ -305,12 +323,10 @@ async function renderedHtml(url: string, waitForSelector?: string) {
         ? { waitForSelector: { selector: waitForSelector, visible: true, timeout: 18_000 } }
         : { waitForTimeout: 4_000 }),
     });
-    if (!result.ok) return "";
-    return (await result.text()).slice(0, MAX_RENDERED_BYTES);
+    return renderedContentBody(result);
   } catch {
     const result = await browser.quickAction("content", { ...baseOptions, waitForTimeout: 8_000 });
-    if (!result.ok) return "";
-    return (await result.text()).slice(0, MAX_RENDERED_BYTES);
+    return renderedContentBody(result);
   }
 }
 
@@ -327,13 +343,22 @@ async function renderedLinks(url: string) {
       userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/150 Safari/537.36",
     });
     if (!response.ok) return [];
-    const value = await response.json().catch(() => [] as unknown);
+    const body = await response.text();
+    let value: unknown = [];
+    try { value = JSON.parse(body); } catch { return []; }
     const links = Array.isArray(value)
       ? value
       : value && typeof value === "object" && Array.isArray((value as { result?: unknown[] }).result)
         ? (value as { result: unknown[] }).result
         : [];
-    return links.map(String).filter((candidate) => candidate.startsWith("https://"));
+    return links
+      .flatMap((candidate) => {
+        if (typeof candidate === "string") return [candidate];
+        if (!candidate || typeof candidate !== "object") return [];
+        const record = candidate as { href?: unknown; url?: unknown; link?: unknown };
+        return [record.href, record.url, record.link].filter((entry): entry is string => typeof entry === "string");
+      })
+      .filter((candidate) => candidate.startsWith("https://"));
   } catch {
     return [];
   }

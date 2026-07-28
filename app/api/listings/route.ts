@@ -600,22 +600,63 @@ async function browserQuickAction(action: "content" | "links", url: string) {
   }
 }
 
+type BrowserRunEnvelope = {
+  success?: boolean;
+  result?: unknown;
+  errors?: unknown;
+  messages?: unknown;
+};
+
+/**
+ * Browser Run Worker bindings return Cloudflare's JSON envelope in production:
+ * `{ success: true, result: ... }`. Older local fixtures and some compatibility
+ * bindings returned the action payload directly. Read the body once and accept
+ * both shapes so production HTML is never passed to a parser as escaped JSON.
+ */
+async function readBrowserRunResult(response: Response, action: "content" | "links") {
+  const body = await response.text();
+  if (!body.trim()) return action === "content" ? "" : [];
+
+  let decoded: unknown;
+  try {
+    decoded = JSON.parse(body);
+  } catch {
+    // Raw HTML is retained for local/test bindings. A raw non-JSON links body
+    // is not a valid links response and therefore yields no candidates.
+    return action === "content" ? body : [];
+  }
+
+  const envelope = decoded && typeof decoded === "object" && !Array.isArray(decoded)
+    ? decoded as BrowserRunEnvelope
+    : undefined;
+  if (envelope?.success === false) {
+    throw new Error(`Browser Run ${action} returned an unsuccessful response.`);
+  }
+  return envelope && Object.prototype.hasOwnProperty.call(envelope, "result")
+    ? envelope.result
+    : decoded;
+}
+
 async function fetchRenderedText(url: string) {
   const response = await browserQuickAction("content", url);
   if (!response) return "";
-  if (!response.ok) throw new Error(`Browser Run content HTTP ${response.status}`);
-  return (await response.text()).slice(0, MAX_HTML);
+  if (!response.ok) {
+    const detail = (await response.text()).slice(0, 500);
+    throw new Error(`Browser Run content HTTP ${response.status}: ${detail}`);
+  }
+  const result = await readBrowserRunResult(response, "content");
+  return (typeof result === "string" ? result : "").slice(0, MAX_HTML);
 }
 
 async function fetchRenderedLinks(url: string) {
   const response = await browserQuickAction("links", url);
   if (!response) return [] as string[];
-  if (!response.ok) throw new Error(`Browser Run links HTTP ${response.status}`);
-  try {
-    return [...new Set(renderedLinkValues(await response.json()))];
-  } catch {
-    return [] as string[];
+  if (!response.ok) {
+    const detail = (await response.text()).slice(0, 500);
+    throw new Error(`Browser Run links HTTP ${response.status}: ${detail}`);
   }
+  const result = await readBrowserRunResult(response, "links");
+  return [...new Set(renderedLinkValues(result))];
 }
 
 function renderedLinkValues(value: unknown): string[] {
@@ -1153,7 +1194,7 @@ async function browserRenderedItems(
       const html = await fetchRenderedText(directUrl);
       let items = directItems(html, marketplace, directUrl);
       successful += 1;
-      if (!items.length && (marketplace === "Goofish" || zenMarketBacked)) {
+      if (!items.length && (marketplace === "Depop" || marketplace === "Goofish" || zenMarketBacked)) {
         try {
           const links = await fetchRenderedLinks(directUrl);
           items = renderedLinksToItems(links, marketplace, directUrl);
@@ -2015,7 +2056,28 @@ function fromRecord(record: Record<string, unknown>, marketplace: Marketplace, p
 
 async function hydrate(marketplace: Marketplace, item: DiscoveredItem) {
   try {
-    const html = await fetchText(item.url, "text/html,application/xhtml+xml");
+    let html = "";
+    let directFetchError: unknown;
+    try {
+      html = await fetchText(item.url, "text/html,application/xhtml+xml");
+    } catch (error) {
+      directFetchError = error;
+    }
+
+    // Depop commonly returns a client shell or rejects an ordinary Worker
+    // fetch in production. When the search page supplied only a canonical link
+    // (or the direct product request failed), render the individual product
+    // page so its JSON-LD/OpenGraph price and image can still be hydrated.
+    if (marketplace === "Depop") {
+      const readablePrice = item.publicPrice || priceFromPublicText(html).amount;
+      if (!html || !readablePrice) {
+        const rendered = await fetchRenderedText(item.url).catch(() => "");
+        if (rendered) html = rendered;
+      }
+    }
+    if (!html && directFetchError) throw directFetchError;
+    if (!html) throw new Error("Listing page returned no readable HTML.");
+
     let card: Card | null = null;
     for (const match of html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)) {
       const body = match[1].trim();
@@ -2131,6 +2193,7 @@ export const __marketSourceTest = {
   fetchRenderedText,
   fetchRenderedLinks,
   renderedLinksToItems,
+  hydrate,
   mercariDpop,
   mercariSearchBody,
   mercariItemsFromResponse,

@@ -77,6 +77,26 @@ keeps `/api/*` on the same origin as the browser application, and includes the
 `BROWSER` binding declared in `wrangler.vinext-build.toml`. Ordinary HTTP is tried
 first; Browser Run renders built-in dynamic marketplace sources when no public cards are found. AI Search uses Browser Run content and link extraction for JavaScript-heavy search/product pages, but filters out all built-in marketplace domains so the AI card contributes additional stores. The AI button still runs selected built-in adapters and Rakuten through ZenMarket in the same bounded parallel batch. The browser binding uses remote mode in development because Quick Actions do not run in the local-only Workers runtime.
 
+
+## Depop production checklist
+
+Depop is a JavaScript-heavy source and must use the full-stack Worker plus the
+remote `BROWSER` binding. The listing route now decodes the production Quick
+Action envelope (`success` + `result`) before sending rendered HTML to the Depop
+parser. When a search page provides links without readable card data, it also
+runs the `links` Quick Action and renders the individual `/products/` page to
+recover public Open Graph/JSON-LD price and image data.
+
+After deployment, verify the route directly:
+
+```powershell
+curl.exe "https://YOUR-DOMAIN/api/listings?marketplace=Depop&q=supreme&page=0&mode=active"
+```
+
+A healthy response should report `browserBindingAvailable: true` when ordinary
+Depop HTML returned no cards, and one source failure must not cancel other
+marketplaces because all production fan-outs use settled-result handling.
+
 ## Worker runtime module during Vinext builds
 
 The Browser Run binding is read with `import("cloudflare:workers")`, which is

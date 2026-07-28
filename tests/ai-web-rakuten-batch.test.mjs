@@ -104,28 +104,31 @@ test("AI Search renders unsupported shops and excludes built-in marketplace doma
       async quickAction(action, options) {
         const url = String(options.url || "");
         if (action === "links") {
-          if (url.includes("ebay.com/sch")) return Response.json(["https://www.ebay.com/itm/123456789012"]);
-          if (url.includes("mercari.com/search")) return Response.json(["https://www.mercari.com/us/item/m12345678901/"]);
-          if (url.includes("facebook.com/marketplace")) return Response.json(["https://www.facebook.com/marketplace/item/123456789012345/"]);
-          return Response.json([
-            "https://shop.example.com/products/raf-tee",
-            "https://www.depop.com/products/example-built-in/",
-          ]);
+          if (url.includes("ebay.com/sch")) return Response.json({ success: true, result: ["https://www.ebay.com/itm/123456789012"] });
+          if (url.includes("mercari.com/search")) return Response.json({ success: true, result: ["https://www.mercari.com/us/item/m12345678901/"] });
+          if (url.includes("facebook.com/marketplace")) return Response.json({ success: true, result: ["https://www.facebook.com/marketplace/item/123456789012345/"] });
+          return Response.json({
+            success: true,
+            result: [
+              "https://shop.example.com/products/raf-tee",
+              "https://www.depop.com/products/example-built-in/",
+            ],
+          });
         }
         assert.equal(action, "content");
-        if (url.includes("ebay.com/sch")) return new Response('<a href="https://www.ebay.com/itm/123456789012">Raf Simons eBay Archive Jacket $240</a>');
-        if (url.includes("mercari.com/search")) return new Response('<a href="https://www.mercari.com/us/item/m12345678901/">Raf Simons Mercari US Tee $95</a>');
-        if (url.includes("facebook.com/marketplace")) return new Response('<a href="https://www.facebook.com/marketplace/item/123456789012345/">Raf Simons Facebook Marketplace Coat $180</a>');
+        if (url.includes("ebay.com/sch")) return Response.json({ success: true, result: '<a href="https://www.ebay.com/itm/123456789012">Raf Simons eBay Archive Jacket $240</a>' });
+        if (url.includes("mercari.com/search")) return Response.json({ success: true, result: '<a href="https://www.mercari.com/us/item/m12345678901/">Raf Simons Mercari US Tee $95</a>' });
+        if (url.includes("facebook.com/marketplace")) return Response.json({ success: true, result: '<a href="https://www.facebook.com/marketplace/item/123456789012345/">Raf Simons Facebook Marketplace Coat $180</a>' });
         if (url.includes("bing.com/search") || url.includes("duckduckgo.com/html")) {
-          return new Response(
-            '<html><body>' +
-            '<a href="https://shop.example.com/products/raf-tee">Raf Simons Public Shop Tee $120</a>' +
-            '<a href="https://www.depop.com/products/example-built-in/">Built-in Depop Listing $99</a>' +
-            '</body></html>',
-            { status: 200 },
-          );
+          return Response.json({
+            success: true,
+            result: '<html><body>' +
+              '<a href="https://shop.example.com/products/raf-tee">Raf Simons Public Shop Tee $120</a>' +
+              '<a href="https://www.depop.com/products/example-built-in/">Built-in Depop Listing $99</a>' +
+              '</body></html>',
+          });
         }
-        return new Response("<html></html>", { status: 200 });
+        return Response.json({ success: true, result: "<html></html>" });
       },
     };
 

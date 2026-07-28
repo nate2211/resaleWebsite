@@ -1,13 +1,13 @@
 # Validation status
 
-Updated July 27, 2026.
+Updated July 28, 2026.
 
 Passed in this packaging environment:
 
 - TypeScript/TSX syntax transpilation for all 32 application and route files; structural checks for the React client, deterministic analysis,
   local-model intelligence, safe public-web reader, engagement/authenticity
   research, favorites persistence, and listing-monitor API
-- 45 source/regression tests: 44 passed and one rendered-preview test skipped because no production artifact is bundled. Coverage includes executable AI Browser Run discovery, paired Rakuten JSON-LD image/title/price/URL extraction, Depop, Mercari Japan, ZenMarket-card parsing, marketplace selection, indexed-search redirect, sold-listing, article-filter, and append-pagination fixtures
+- 45 source/regression tests: 44 passed and one rendered-preview test skipped because no production artifact is bundled. The executable Depop production fixture uses Cloudflare's current `{ success, result }` content and links envelopes, verifies rendered-link recovery, blocks the ordinary product fetch, and confirms Browser Run hydration still returns the listing price, image, and canonical URL. Coverage includes executable AI Browser Run discovery, paired Rakuten JSON-LD image/title/price/URL extraction, Depop, Mercari Japan, ZenMarket-card parsing, marketplace selection, indexed-search redirect, sold-listing, article-filter, and append-pagination fixtures
 - empty-workspace checks confirming that demo listings, synthetic comparable
   prices, and generated resale projections are not preloaded
 - listing-monitor checks for active, sold, removed, and unknown states, with
