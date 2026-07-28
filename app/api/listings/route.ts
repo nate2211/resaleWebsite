@@ -5,7 +5,7 @@ import { normalizePublicListingRecord, priceFromPublicText } from "../../lib/pub
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
-const WORKER_REVISION = "depop-images-api-production-v5";
+const WORKER_REVISION = "depop-production-results-images-v6";
 
 type Marketplace =
   | "Depop" | "Grailed" | "Poshmark" | "Mercari Japan"
@@ -37,7 +37,7 @@ type DiscoveredItem = {
 };
 
 type BrowserRunBinding = {
-  quickAction(action: "content" | "links", options: Record<string, unknown>): Promise<Response>;
+  quickAction(action: "content" | "links" | "scrape", options: Record<string, unknown>): Promise<Response>;
 };
 
 type BrowserRenderedBatch = {
@@ -645,7 +645,9 @@ function browserLoadOptions(url: string) {
   return {
     ...base,
     ...(selector
-      ? { waitForSelector: { selector, visible: true, timeout: 22_000 } }
+      ? { waitForSelector: host.endsWith("depop.com")
+          ? { selector, timeout: 28_000 }
+          : { selector, visible: true, timeout: 22_000 } }
       : { waitForTimeout: 6_000 }),
   };
 }
@@ -656,28 +658,26 @@ function browserFallbackLoadOptions(url: string) {
   return { ...rest, waitForTimeout: 10_000 };
 }
 
-async function browserQuickAction(action: "content" | "links", url: string) {
+async function browserQuickAction(action: "content" | "links" | "scrape", url: string, extra: Record<string, unknown> = {}) {
   const browser = await browserRunBinding();
   if (!browser) return undefined;
   const primaryOptions = {
     ...browserLoadOptions(url),
     ...(action === "links" ? { excludeExternalLinks: false } : {}),
+    ...extra,
   };
   const fallbackOptions = {
     ...browserFallbackLoadOptions(url),
     ...(action === "links" ? { excludeExternalLinks: false } : {}),
+    ...extra,
   };
   try {
-    return action === "content"
-      ? await browser.quickAction("content", primaryOptions)
-      : await browser.quickAction("links", primaryOptions);
+    return await browser.quickAction(action, primaryOptions);
   } catch {
-    // ZenMarket and Rakuten can finish loading even when a product selector is
-    // renamed or the query returns zero cards. Retry once after a fixed settle
-    // delay so source markup and links can still be inspected.
-    return action === "content"
-      ? browser.quickAction("content", fallbackOptions)
-      : browser.quickAction("links", fallbackOptions);
+    // Dynamic stores can finish loading even when a product selector is renamed
+    // or the query returns zero cards. Retry once after a fixed settle delay so
+    // source markup, links, or scraped elements can still be inspected.
+    return browser.quickAction(action, fallbackOptions);
   }
 }
 
@@ -694,7 +694,7 @@ type BrowserRunEnvelope = {
  * bindings returned the action payload directly. Read the body once and accept
  * both shapes so production HTML is never passed to a parser as escaped JSON.
  */
-async function readBrowserRunResult(response: Response, action: "content" | "links") {
+async function readBrowserRunResult(response: Response, action: "content" | "links" | "scrape") {
   const body = await response.text();
   if (!body.trim()) return action === "content" ? "" : [];
 
@@ -738,6 +738,89 @@ async function fetchRenderedLinks(url: string) {
   }
   const result = await readBrowserRunResult(response, "links");
   return [...new Set(renderedLinkValues(result))];
+}
+
+type ScrapedAttribute = { name?: unknown; value?: unknown };
+type ScrapedElement = {
+  attributes?: ScrapedAttribute[];
+  html?: unknown;
+  text?: unknown;
+};
+type ScrapedSelectorResult = {
+  selector?: unknown;
+  results?: ScrapedElement[];
+};
+
+function scrapedAttribute(element: ScrapedElement, name: string) {
+  const entry = (element.attributes || []).find((candidate) =>
+    String(candidate?.name || "").toLowerCase() === name.toLowerCase());
+  return typeof entry?.value === "string" ? entry.value : "";
+}
+
+/** Convert Browser Run /scrape output into canonical Depop cards. This route is
+ * intentionally independent of Depop's internal JSON API: when that API rejects
+ * Workers, the public rendered search DOM still contains product anchors and
+ * first-party media URLs. */
+function depopScrapedItems(value: unknown, baseUrl: string) {
+  const groups = Array.isArray(value) ? value : [];
+  const found = new Map<string, DiscoveredItem>();
+  for (const groupValue of groups) {
+    const group = objectRecord(groupValue) as ScrapedSelectorResult | undefined;
+    if (!group || !Array.isArray(group.results)) continue;
+    for (const element of group.results) {
+      const href = scrapedAttribute(element, "href");
+      const url = cleanUrl(absolute(href, baseUrl), "Depop");
+      const html = typeof element.html === "string" ? element.html : "";
+      const visibleText = text(typeof element.text === "string" ? element.text : html);
+      if (url) {
+        const image = depopImageFromHtml(html, baseUrl)
+          || depopProductImage(scrapedAttribute(element, "data-image"), baseUrl);
+        const price = priceFromPublicText(visibleText);
+        const title = text(
+          scrapedAttribute(element, "aria-label")
+          || scrapedAttribute(element, "title")
+          || html.match(/<img\b[^>]*alt=(?:"([^"]+)"|'([^']+)')/i)?.[1]
+          || html.match(/<img\b[^>]*alt=(?:"([^"]+)"|'([^']+)')/i)?.[2]
+          || visibleText.split(/\$\s*\d|USD\s*\d/i)[0]
+          || depopSlugTitle(new URL(url).pathname.split("/").filter(Boolean).at(-1) || ""),
+        ).slice(0, 220);
+        const item: DiscoveredItem = {
+          url,
+          title: title || "Depop listing",
+          description: visibleText.slice(0, 700) || "Rendered Depop product card.",
+          ...(price.amount ? { publicPrice: price.amount, publicCurrency: price.currency || "USD" } : {}),
+          ...(image ? { image } : {}),
+        };
+        found.set(url, mergeDiscovered(found.get(url), item));
+        continue;
+      }
+      // Some selectors return the card container instead of the anchor itself.
+      // Feed that card back through the normal Depop HTML parser.
+      if (/\/products\//i.test(html)) {
+        for (const item of depopSearchItems(`<li class="depop-scraped-card">${html}</li>`, baseUrl)) {
+          found.set(item.url, mergeDiscovered(found.get(item.url), item));
+        }
+      }
+    }
+  }
+  return [...found.values()];
+}
+
+async function fetchRenderedDepopItems(url: string) {
+  const response = await browserQuickAction("scrape", url, {
+    elements: [
+      { selector: 'a[href*="/products/"]' },
+      { selector: 'li a[href*="/products/"]' },
+      { selector: 'article a[href*="/products/"]' },
+    ],
+  });
+  if (!response) return [] as DiscoveredItem[];
+  if (!response.ok) {
+    const detail = (await response.text()).slice(0, 500);
+    throw new Error(`Browser Run scrape HTTP ${response.status}: ${detail}`);
+  }
+  const result = await readBrowserRunResult(response, "scrape");
+  return depopScrapedItems(result, url);
 }
 
 function renderedLinkValues(value: unknown): string[] {
@@ -1276,34 +1359,47 @@ async function browserRenderedItems(
     return { batches: [], successful: 0, failed: 0 };
   }
   const execute = async () => {
-  const batches: BrowserRenderedBatch[] = [];
-  let successful = 0;
-  let failed = 0;
-  // Browser time is finite, so render official routes sequentially and stop as
-  // soon as a page yields canonical products. Goofish gets a links-only second
-  // pass because its result cards may be painted without useful outer HTML.
-  const renderLimit = marketplace === "Depop" ? 2 : zenMarketBacked ? 3 : 4;
-  for (const directUrl of directUrls.slice(0, renderLimit)) {
-    try {
-      const html = await fetchRenderedText(directUrl);
-      let items = directItems(html, marketplace, directUrl);
-      successful += 1;
-      if (!items.length && (marketplace === "Depop" || marketplace === "Goofish" || zenMarketBacked)) {
-        try {
-          const links = await fetchRenderedLinks(directUrl);
-          items = renderedLinksToItems(links, marketplace, directUrl);
+    const batches: BrowserRenderedBatch[] = [];
+    let successful = 0;
+    let failed = 0;
+    const renderLimit = marketplace === "Depop" ? 3 : zenMarketBacked ? 3 : 4;
+    for (const directUrl of directUrls.slice(0, renderLimit)) {
+      let items: DiscoveredItem[] = [];
+
+      // Each Browser Run action settles independently. A timeout from /content
+      // must not prevent /scrape or /links from recovering Depop cards.
+      const contentAttempt = await Promise.allSettled([fetchRenderedText(directUrl)]);
+      if (contentAttempt[0].status === "fulfilled") {
+        items = directItems(contentAttempt[0].value, marketplace, directUrl);
+        successful += 1;
+      } else {
+        failed += 1;
+      }
+
+      if (!items.length && marketplace === "Depop") {
+        const scrapeAttempt = await Promise.allSettled([fetchRenderedDepopItems(directUrl)]);
+        if (scrapeAttempt[0].status === "fulfilled") {
+          items = scrapeAttempt[0].value;
           successful += 1;
-        } catch {
+        } else {
           failed += 1;
         }
       }
+
+      if (!items.length && (marketplace === "Depop" || marketplace === "Goofish" || zenMarketBacked)) {
+        const linksAttempt = await Promise.allSettled([fetchRenderedLinks(directUrl)]);
+        if (linksAttempt[0].status === "fulfilled") {
+          items = renderedLinksToItems(linksAttempt[0].value, marketplace, directUrl);
+          successful += 1;
+        } else {
+          failed += 1;
+        }
+      }
+
       batches.push({ url: directUrl, items });
       if (items.length) break;
-    } catch {
-      failed += 1;
     }
-  }
-  return { batches, successful, failed };
+    return { batches, successful, failed };
   };
   return zenMarketBacked ? withZenMarketBrowserSlot(execute) : execute();
 }
@@ -1558,50 +1654,42 @@ function anchorTextAt(html: string, index: number) {
 
 function depopSearchItems(html: string, baseUrl: string) {
   const found = new Map<string, DiscoveredItem>();
-  const blocks = html.match(/<li\b[^>]*class="[^"]*styles_listItem__[^"]*"[^>]*>[\s\S]*?<\/li>/gi) ?? [];
-  for (const block of blocks) {
-    const anchor = block.match(/<a\b[^>]*href="([^"]*\/products\/[^"?#]+\/?(?:\?[^"#]*)?)"[^>]*>/i);
-    if (!anchor) continue;
-    const url = cleanUrl(absolute(anchor[1], baseUrl), "Depop");
+  const anchorPattern = /<a\b[^>]*href\s*=\s*(?:"([^"]*\/products\/[^"#]+)"|'([^']*\/products\/[^'#]+)')[^>]*>/gi;
+  for (const match of html.matchAll(anchorPattern)) {
+    const rawHref = match[1] || match[2] || "";
+    const url = cleanUrl(absolute(rawHref, baseUrl), "Depop");
     if (!url) continue;
-    const anchorTag = anchor[0];
+    const anchorTag = match[0];
+    const block = nearestProductBlock(html, match.index ?? 0);
     const title = text(
-      anchorTag.match(/aria-label="([^"]+)"/i)?.[1]
-      || block.match(/<img\b[^>]*alt="([^"]+)"/i)?.[1]
-      || "Depop listing",
+      attribute(anchorTag, "aria-label")
+      || attribute(anchorTag, "title")
+      || block.match(/<img\b[^>]*alt=(?:"([^"]+)"|'([^']+)')/i)?.[1]
+      || block.match(/<img\b[^>]*alt=(?:"([^"]+)"|'([^']+)')/i)?.[2]
+      || anchorTextAt(html, match.index ?? 0)
+      || depopSlugTitle(new URL(url).pathname.split("/").filter(Boolean).at(-1) || ""),
     );
-    const brand = text(block.match(/styles_brandName__[^"']*["'][^>]*>([\s\S]*?)<\/p>/i)?.[1]);
-    const size = text(block.match(/styles_sizeAttributeText__[^"']*["'][^>]*>([\s\S]*?)<\/p>/i)?.[1]);
-    const priceMatches = [...block.matchAll(/<p\b[^>]*styles_price__[^>]*>([\s\S]*?)<\/p>/gi)]
-      .map((match) => priceFromPublicText(text(match[1])))
-      .filter((price) => price.amount > 0);
-    const currentPrice = priceMatches.at(-1) ?? { amount: 0, currency: "" };
-    const imageTag = block.match(/<img\b[^>]*class="[^"]*_mainImage_[^"]*"[^>]*>/i)?.[0]
-      || block.match(/<img\b[^>]*>/i)?.[0]
-      || "";
-    const image = depopProductImage(
-      imageTag.match(/\bsrc="([^"]+)"/i)?.[1]
-      || imageTag.match(/\bdata-src="([^"]+)"/i)?.[1]
-      || imageTag.match(/\bsrcset="([^"]+)"/i)?.[1]?.split(",").at(-1)?.trim().split(/\s+/)[0]
-      || "",
-      baseUrl,
-    );
-    const boosted = /styles_boostedTag__|>\s*Boosted\s*</i.test(block);
-    const description = [brand, size ? `Size ${size}` : "", boosted ? "Boosted listing" : ""]
-      .filter(Boolean)
-      .join(" · ");
+    const brand = text(block.match(/(?:brandName|styles_brandName__)[^>]*>([\s\S]*?)<\//i)?.[1]);
+    const size = text(block.match(/(?:sizeAttributeText|displaySize|styles_sizeAttributeText__)[^>]*>([\s\S]*?)<\//i)?.[1]);
+    const prices = [...text(block).matchAll(/(?:USD|US\$|\$)\s*([\d,.]+)/gi)]
+      .map((priceMatch) => Number.parseFloat(priceMatch[1].replaceAll(",", "")))
+      .filter((value) => Number.isFinite(value) && value > 0);
+    const currentPrice = prices.at(-1) || 0;
+    const image = depopImageFromHtml(block, baseUrl);
+    const boosted = /boosted/i.test(text(block));
+    const description = [brand, size ? `Size ${size}` : "", boosted ? "Boosted listing" : "", text(block).slice(0, 500)]
+      .filter(Boolean).join(" · ").slice(0, 700);
     const item: DiscoveredItem = {
       url,
-      title,
+      title: title || "Depop listing",
       description,
-      ...(currentPrice.amount ? { publicPrice: currentPrice.amount, publicCurrency: currentPrice.currency || "USD" } : {}),
+      ...(currentPrice ? { publicPrice: currentPrice, publicCurrency: "USD" } : {}),
       ...(image ? { image } : {}),
     };
     found.set(url, mergeDiscovered(found.get(url), item));
   }
   return [...found.values()];
 }
-
 
 function attribute(tag: string, name: string) {
   const match = tag.match(new RegExp(`\\b${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`, "i"));
@@ -2516,6 +2604,8 @@ export const __marketSourceTest = {
   withZenMarketBrowserSlot,
   fetchRenderedText,
   fetchRenderedLinks,
+  fetchRenderedDepopItems,
+  depopScrapedItems,
   renderedLinksToItems,
   browserIndexedDepopItems,
   hydrate,
@@ -2622,7 +2712,7 @@ export async function GET(request: Request) {
         browserBindingAvailable: discovery.browserBindingAvailable,
         workerRevision: WORKER_REVISION,
         depopStrategy: marketplace === "Depop"
-          ? "Depop public JSON API + React Flight structured search + Browser Run + rendered links + product JSON-LD hydration + first-party image proxy"
+          ? "Depop public JSON API + React Flight + Browser Run content/scrape/links + product JSON-LD hydration + first-party image proxy"
           : undefined,
         browserRenderedBatches: discovery.browserRenderedBatches,
         browserRenderedUrls: discovery.browserRenderedUrls,

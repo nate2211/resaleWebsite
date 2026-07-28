@@ -3,7 +3,7 @@ import { env } from "cloudflare:workers";
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
-const REVISION = "depop-images-api-production-v5";
+const REVISION = "depop-production-results-images-v6";
 
 export async function GET() {
   const browser = (env as { BROWSER?: { quickAction?: unknown } }).BROWSER;

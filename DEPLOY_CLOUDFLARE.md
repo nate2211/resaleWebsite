@@ -55,7 +55,7 @@ The health endpoint should contain:
 
 ```json
 {
-  "revision": "depop-images-api-production-v5",
+  "revision": "depop-production-results-images-v6",
   "browserBindingAvailable": true
 }
 ```

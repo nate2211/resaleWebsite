@@ -291,6 +291,22 @@ test("parses Depop, Mercari Japan, and Goofish cards and builds a Superbuy proxy
     assert.equal(depopFlight.length, 1, "React Flight storefront records must be parsed");
     assert.match(depopFlight[0].image ?? "", /media-photos\.depop\.com/);
 
+    const depopScraped = adapter.depopScrapedItems([{
+      selector: 'a[href*="/products/"]',
+      results: [{
+        attributes: [
+          { name: "href", value: "/products/rendered-supreme-tee-v6/" },
+          { name: "aria-label", value: "Rendered Supreme Tee" },
+        ],
+        html: '<img src="https://media-photos.depop.com/r1/rendered-v6/P0.jpg" alt="Rendered Supreme Tee">',
+        text: "Rendered Supreme Tee $72.00 Size M",
+      }],
+    }], "https://www.depop.com/search/?q=supreme");
+    assert.equal(depopScraped.length, 1);
+    assert.equal(depopScraped[0].url, "https://www.depop.com/products/rendered-supreme-tee-v6/");
+    assert.equal(depopScraped[0].publicPrice, 72);
+    assert.match(depopScraped[0].image ?? "", /media-photos\.depop\.com/);
+
     assert.equal(
       adapter.depopProductImage("https://external-content.duckduckgo.com/ip3/www.depop.com.ico", "https://www.depop.com/"),
       "",
@@ -703,6 +719,43 @@ test("parses Depop, Mercari Japan, and Goofish cards and builds a Superbuy proxy
     } finally {
       globalThis.fetch = savedFetchForHydration;
       globalThis.__RML_BROWSER__ = regularBrowserFixture;
+    }
+
+    const scrapeOnlyCalls = [];
+    const savedBrowserForScrapeOnly = globalThis.__RML_BROWSER__;
+    globalThis.__RML_BROWSER__ = {
+      async quickAction(action, options) {
+        scrapeOnlyCalls.push({ action, options });
+        if (action === "content") throw new Error("fixture content timed out");
+        if (action === "scrape") return Response.json({
+          success: true,
+          result: [{
+            selector: 'a[href*="/products/"]',
+            results: [{
+              attributes: [
+                { name: "href", value: "/products/scrape-only-supreme-jacket/" },
+                { name: "aria-label", value: "Scrape-only Supreme Jacket" },
+              ],
+              html: '<img src="https://media-photos.depop.com/r1/scrape-only/P0.jpg" alt="Scrape-only Supreme Jacket">',
+              text: "Scrape-only Supreme Jacket $99.00 Size L",
+            }],
+          }],
+        });
+        return Response.json({ success: true, result: [] });
+      },
+    };
+    try {
+      const scrapeOnly = await adapter.browserRenderedItems(
+        "Depop",
+        ["https://www.depop.com/search/?q=scrape-only&page=1"],
+      );
+      assert.equal(scrapeOnly.batches[0].items.length, 1,
+        "Depop scrape must run even when Browser Run content times out");
+      assert.equal(scrapeOnly.batches[0].items[0].publicPrice, 99);
+      assert.match(scrapeOnly.batches[0].items[0].image ?? "", /media-photos\.depop\.com/);
+      assert.ok(scrapeOnlyCalls.some((call) => call.action === "scrape"));
+    } finally {
+      globalThis.__RML_BROWSER__ = savedBrowserForScrapeOnly;
     }
 
     const originalFetch = globalThis.fetch;

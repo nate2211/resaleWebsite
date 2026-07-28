@@ -115,8 +115,9 @@ test("uses Vinext routing and Cloudflare Browser Run only as a zero-card fallbac
     source("vite.config.ts"),
   ]);
   assert.match(route, /browserRenderedItems/);
-  assert.match(route, /quickAction\("content"/);
-  assert.match(route, /quickAction\("links"/);
+  assert.match(route, /browser\.quickAction\(action/);
+  assert.match(route, /"content" \| "links" \| "scrape"/);
+  assert.match(route, /fetchRenderedDepopItems/);
   assert.match(route, /waitForSelector/);
   assert.match(route, /if \(items\.size === 0\)/);
   assert.match(route, /ZENMARKET_MARKETS = \["JDirectItems Auction", "Rakuten", "Rakuten Rakuma"\]/);

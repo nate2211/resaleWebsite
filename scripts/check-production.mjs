@@ -20,7 +20,7 @@ async function readJson(path, timeoutMs = 90000) {
 }
 
 const health = await readJson("/api/health", 30000);
-if (health.body.revision !== "depop-images-api-production-v5") {
+if (health.body.revision !== "depop-production-results-images-v6") {
   throw new Error(`The domain is serving an older Worker revision: ${health.body.revision || "unknown"}`);
 }
 if (!health.body.browserBindingAvailable) {
