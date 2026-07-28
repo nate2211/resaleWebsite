@@ -508,6 +508,14 @@ A normal Vinext App Router build produces Worker, RSC, SSR, client JavaScript, a
 ## Verify the production domain
 
 After `npm run deploy`, run `npm run check:production`. The `/api/health`
-response must report revision `depop-workers-dev-production-v4` and
+response must report revision `depop-images-api-production-v5` and
 `browserBindingAvailable: true`. This also verifies that the workers.dev deployment is
 serving the full-stack Worker rather than an older or assets-only deployment.
+
+## Depop structured data and product images (v5)
+
+Depop search now prefers structured public storefront records before indexed snippets. The adapter reads JSON responses and server-rendered React Flight data, preserving each listing's canonical product URL, price/currency, first-party product photo, brand, size, condition, seller, likes, and status when those public fields are present. Indexed results remain a fallback, but search-engine favicons and Depop application artwork are rejected as product images.
+
+First-party Depop photos are displayed through `/api/image-proxy`, which only accepts approved Depop photo hosts, verifies that the upstream response is an image, and adds Worker/CDN cache headers. The client retries the original image URL once if proxy delivery fails and then uses the local listing placeholder.
+
+Run `npm run check:production` after deployment. Revision `depop-images-api-production-v5` requires at least one real Depop product photo, rejects favicon results, and verifies that the image proxy returns an `image/*` response.

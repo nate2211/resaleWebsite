@@ -74,13 +74,14 @@ function money(value: unknown): PublicPrice {
   const record = objectRecord(value);
   if (!record) return { amount: positiveNumber(value), currency: "" };
   const currency = text(record.currency) || text(record.currencyCode) || text(record.priceCurrency)
-    || text(record.currency_code);
+    || text(record.currency_code) || text(record.currencyName) || text(record.currency_name);
   const cents = positiveNumber(record.cents) || positiveNumber(record.minorUnits)
     || positiveNumber(record.minor_units);
   if (cents) return { amount: cents / 100, currency };
   return {
     amount: positiveNumber(record.amount) || positiveNumber(record.value)
       || positiveNumber(record.price) || positiveNumber(record.current)
+      || positiveNumber(record.priceAmount) || positiveNumber(record.price_amount)
       || positiveNumber(record.formatted) || positiveNumber(record.display),
     currency,
   };
@@ -106,6 +107,12 @@ function genericImage(value: unknown, base: string): string {
   const record = objectRecord(value);
   if (!record) return "";
   for (const key of ["url", "src", "imageUrl", "image_url", "full", "large", "medium", "original", "path"]) {
+    const found = genericImage(record[key], base);
+    if (found) return found;
+  }
+  // Depop preview/picture objects use numeric width keys such as 320, 640,
+  // 960 and 1280. Prefer the largest public rendition for analysis cards.
+  for (const key of Object.keys(record).filter((key) => /^\d{2,4}$/.test(key)).sort((a, b) => Number(b) - Number(a))) {
     const found = genericImage(record[key], base);
     if (found) return found;
   }

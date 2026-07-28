@@ -165,6 +165,20 @@ const VIEWS: { id: View; label: string }[] = [
 
 const FALLBACK_IMAGE = "/listing-placeholder.svg";
 
+function listingImageSource(listing: Listing) {
+  if (!listing.image) return FALLBACK_IMAGE;
+  if (listing.marketplace !== "Depop") return listing.image;
+  try {
+    const url = new URL(listing.image);
+    const host = url.hostname.toLowerCase();
+    if (host === "media-photos.depop.com" || host.endsWith(".media-photos.depop.com")
+      || (/^(?:images|photos|media)\./.test(host) && host.endsWith(".depop.com"))) {
+      return `/api/image-proxy?url=${encodeURIComponent(url.toString())}`;
+    }
+  } catch { /* use placeholder below */ }
+  return FALLBACK_IMAGE;
+}
+
 function clampNumber(value: string, fallback = 0) {
   const parsed = Number.parseFloat(value);
   return Number.isFinite(parsed) ? Math.max(0, parsed) : fallback;
@@ -432,13 +446,20 @@ function ProductImage({
   return (
     <img
       className={`product-image ${className}`}
-      src={listing.image || FALLBACK_IMAGE}
+      src={listingImageSource(listing)}
       alt={listing.title}
       loading="lazy"
       decoding="async"
       referrerPolicy="no-referrer"
       onError={(event) => {
-        event.currentTarget.src = FALLBACK_IMAGE;
+        const image = event.currentTarget;
+        if (listing.marketplace === "Depop" && listing.image
+          && image.src.includes("/api/image-proxy") && image.dataset.directRetry !== "1") {
+          image.dataset.directRetry = "1";
+          image.src = listing.image;
+          return;
+        }
+        image.src = FALLBACK_IMAGE;
       }}
     />
   );

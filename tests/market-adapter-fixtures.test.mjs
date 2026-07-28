@@ -25,7 +25,7 @@ test("parses Depop, Mercari Japan, and Goofish cards and builds a Superbuy proxy
   const outDir = await mkdtemp(join(tmpdir(), "rml-adapters-"));
   try {
     const inputs = [
-      "app/api/listings/route.ts", "app/lib/engagement.ts",
+      "app/api/listings/route.ts", "app/api/image-proxy/route.ts", "app/lib/engagement.ts",
       "app/lib/apparel.ts", "app/lib/public-listing-record.ts",
     ].map((value) => fileURLToPath(new URL(value, root)));
     const result = spawnSync(command, [
@@ -37,6 +37,7 @@ test("parses Depop, Mercari Japan, and Goofish cards and builds a Superbuy proxy
     await writeFile(join(outDir, "package.json"), '{"type":"commonjs"}\n');
     const require = createRequire(import.meta.url);
     const route = require(join(outDir, "api/listings/route.js"));
+    const imageProxyRoute = require(join(outDir, "api/image-proxy/route.js"));
     const adapter = route.__marketSourceTest;
 
     const depop = adapter.directItems(
@@ -247,6 +248,100 @@ test("parses Depop, Mercari Japan, and Goofish cards and builds a Superbuy proxy
     assert.match(depopSearch[0].description, /Supreme/);
     assert.match(depopSearch[0].description, /Size M/);
     assert.doesNotMatch(depopSearch[0].url, /products\/create/);
+
+    const depopApiPayload = JSON.stringify({
+      meta: { hasMore: true },
+      products: [{
+        id: 991,
+        slug: "nate-supreme-box-logo-tee-abcd",
+        description: "Supreme Box Logo Tee in excellent condition.",
+        price: {
+          priceAmount: "85.00",
+          currencyName: "USD",
+          nationalShippingCost: "7.99",
+        },
+        preview: {
+          320: "https://media-photos.depop.com/r1/api-fixture/P0.jpg",
+          1280: "https://media-photos.depop.com/r1/api-fixture/P0.jpg",
+        },
+        pictures: [{ 1280: "https://media-photos.depop.com/r1/api-fixture/P0.jpg" }],
+        brand_name: "Supreme",
+        sizes: ["M"],
+        condition: "Excellent condition",
+        seller: { username: "nate_fixture" },
+        like_count: 14,
+        status: "ON_SALE",
+      }],
+    });
+    const depopStructured = adapter.depopStructuredItems(
+      depopApiPayload,
+      "https://webapi.depop.com/api/v3/search/products/?what=supreme&itemsPerPage=24&country=us&currency=USD",
+    );
+    assert.equal(depopStructured.length, 1);
+    assert.equal(depopStructured[0].url, "https://www.depop.com/products/nate-supreme-box-logo-tee-abcd/");
+    assert.equal(depopStructured[0].publicPrice, 85);
+    assert.equal(depopStructured[0].publicCurrency, "USD");
+    assert.equal(depopStructured[0].image, "https://media-photos.depop.com/r1/api-fixture/P0.jpg");
+    assert.match(depopStructured[0].description, /Size M/);
+    assert.match(depopStructured[0].description, /14 likes/);
+
+    const depopFlight = adapter.depopStructuredItems(`
+      <script>self.__next_f.push([1,${JSON.stringify(depopApiPayload)}])</script>
+    `, "https://www.depop.com/search/?q=supreme&page=1");
+    assert.equal(depopFlight.length, 1, "React Flight storefront records must be parsed");
+    assert.match(depopFlight[0].image ?? "", /media-photos\.depop\.com/);
+
+    assert.equal(
+      adapter.depopProductImage("https://external-content.duckduckgo.com/ip3/www.depop.com.ico", "https://www.depop.com/"),
+      "",
+      "search-engine favicons must never become product images",
+    );
+    assert.equal(
+      adapter.depopProductImage("https://media-photos.depop.com/r1/api-fixture/P0.jpg", "https://www.depop.com/"),
+      "https://media-photos.depop.com/r1/api-fixture/P0.jpg",
+    );
+    assert.ok(imageProxyRoute.__imageProxyTest.allowedDepopImage("https://media-photos.depop.com/r1/api-fixture/P0.jpg"));
+    assert.equal(imageProxyRoute.__imageProxyTest.allowedDepopImage("https://external-content.duckduckgo.com/ip3/www.depop.com.ico"), undefined);
+
+    const savedImageFetch = globalThis.fetch;
+    globalThis.fetch = async () => new Response(new Uint8Array([255, 216, 255, 217]), {
+      status: 200,
+      headers: { "content-type": "image/jpeg", "content-length": "4" },
+    });
+    try {
+      const proxiedImage = await imageProxyRoute.GET(new Request(
+        "http://localhost/api/image-proxy?url=" + encodeURIComponent("https://media-photos.depop.com/r1/api-fixture/P0.jpg"),
+      ));
+      assert.equal(proxiedImage.status, 200);
+      assert.equal(proxiedImage.headers.get("content-type"), "image/jpeg");
+      assert.match(proxiedImage.headers.get("cache-control") || "", /s-maxage/);
+    } finally {
+      globalThis.fetch = savedImageFetch;
+    }
+
+    const apiUrls = adapter.depopApiSearchUrls("supreme box logo");
+    assert.equal(apiUrls.length, 2);
+    assert.match(apiUrls[0], /api\/v3\/search\/products/);
+    assert.match(apiUrls[0], /what=supreme\+box\+logo/);
+    assert.match(apiUrls[1], /api\/v2\/search\/products/);
+
+    const savedDepopApiFetch = globalThis.fetch;
+    globalThis.fetch = async (input) => {
+      const target = String(input);
+      if (target.includes("webapi.depop.com/api/v3/search/products")) {
+        return new Response(depopApiPayload, { status: 200, headers: { "content-type": "application/json" } });
+      }
+      return new Response("{}", { status: 404, headers: { "content-type": "application/json" } });
+    };
+    try {
+      const depopApi = await adapter.depopApiItems("supreme", 0, false);
+      assert.equal(depopApi.items.length, 1);
+      assert.equal(depopApi.items[0].publicPrice, 85);
+      assert.match(depopApi.items[0].image ?? "", /media-photos\.depop\.com/);
+      assert.ok(depopApi.sourceUrls.some((value) => value.includes("/api/v3/search/products/")));
+    } finally {
+      globalThis.fetch = savedDepopApiFetch;
+    }
 
     const mercariRecords = Array.from({ length: 30 }, (_, index) => ({
       id: `m${String(index + 1).padStart(11, "0")}`,

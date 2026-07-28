@@ -20,7 +20,7 @@ async function readJson(path, timeoutMs = 90000) {
 }
 
 const health = await readJson("/api/health", 30000);
-if (health.body.revision !== "depop-workers-dev-production-v4") {
+if (health.body.revision !== "depop-images-api-production-v5") {
   throw new Error(`The domain is serving an older Worker revision: ${health.body.revision || "unknown"}`);
 }
 if (!health.body.browserBindingAvailable) {
@@ -38,4 +38,27 @@ console.log(JSON.stringify({
 
 if (!Array.isArray(depop.body.listings) || depop.body.listings.length === 0) {
   throw new Error("The production Depop request returned no listing links. Check the printed diagnostics and Worker logs.");
+}
+const faviconListings = depop.body.listings.filter((listing) =>
+  /(?:external-content\.duckduckgo\.com\/ip3\/|favicon|\.ico(?:$|\?))/i.test(String(listing?.image || "")),
+);
+if (faviconListings.length) {
+  throw new Error(`Depop returned ${faviconListings.length} favicon image(s) instead of product photos.`);
+}
+const photographed = depop.body.listings.find((listing) =>
+  /^https:\/\/media-photos\.depop\.com\//i.test(String(listing?.image || "")),
+);
+if (!photographed) {
+  throw new Error("Depop returned listings but none contained a first-party product photo. Check depopApiItems and product hydration diagnostics.");
+}
+const proxyUrl = `/api/image-proxy?url=${encodeURIComponent(photographed.image)}`;
+const proxyController = new AbortController();
+const proxyTimer = setTimeout(() => proxyController.abort(), 30000);
+try {
+  const proxy = await fetch(`${base}${proxyUrl}`, { signal: proxyController.signal, headers: { accept: "image/*" } });
+  if (!proxy.ok || !String(proxy.headers.get("content-type") || "").startsWith("image/")) {
+    throw new Error(`The Depop image proxy failed with HTTP ${proxy.status} and content-type ${proxy.headers.get("content-type") || "unknown"}.`);
+  }
+} finally {
+  clearTimeout(proxyTimer);
 }

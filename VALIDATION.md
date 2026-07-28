@@ -49,5 +49,13 @@ accepts either a full-stack Vinext Worker artifact (`wrangler.json`, JavaScript,
 - Rakuten recovery now parses product-level JSON-LD and inline ItemList records so each title, JPY price, canonical URL, and image stays paired. Truncated item URLs are rejected, discovered images survive hydration when detail pages omit metadata, and rendered product images use `referrerPolicy="no-referrer"` to avoid referrer-based CDN failures.
 
 - Production deployment now has one source-of-truth `wrangler.jsonc` used by both Vite and `@vinext/cloudflare deploy`. It declares the Vinext App Router entry, `BROWSER` binding, `nodejs_compat`, source maps, observability, workers.dev previews, and the existing `resalewebsite` workers.dev Worker with no custom-domain routes. The assets-only configuration moved to `wrangler.static.toml` so it cannot be selected accidentally by the production command.
-- `/api/health` and every listing response expose revision `depop-workers-dev-production-v4`; `npm run check:production` fails when the domain serves an older Worker, lacks Browser Run, or returns no Depop product links.
+- `/api/health` and every listing response expose revision `depop-images-api-production-v5`; `npm run check:production` fails when the domain serves an older Worker, lacks Browser Run, or returns no Depop product links.
 - Depop has a rendered web-index fallback in addition to direct/rendered marketplace search. Canonical product links remain visible with an explicit price-unavailable state when product hydration is blocked, preventing a source-level anti-bot response from collapsing the marketplace to zero cards.
+
+## Depop images and storefront data v5
+
+- Structured Depop JSON fixture preserves URL, USD price, 1280px `media-photos.depop.com` image, brand, size, seller, condition, likes, and status.
+- React Flight fixture resolves the same product record without pairing unrelated HTML nodes.
+- DuckDuckGo `ip3` favicons and `.ico` URLs are rejected before merge and hydration.
+- The same-origin `/api/image-proxy` allowlist accepts Depop product media, rejects unrelated hosts, validates image content types, and returns cache headers.
+- Production checker requires revision `depop-images-api-production-v5`, at least one first-party Depop product image, zero favicon images, and a working image proxy response.
