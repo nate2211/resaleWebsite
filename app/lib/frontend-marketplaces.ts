@@ -11,6 +11,7 @@ import {
   priceFromPublicText,
 } from "./public-listing-record";
 import { inferApparelType } from "./apparel";
+import { zenMarketCatalogRecords } from "./zenmarket-source-parsers";
 import {
   GRAILED_PUBLIC_CONFIG_FALLBACK,
   grailedHitToRecord,
@@ -67,7 +68,7 @@ const BRIDGE_TIMEOUT_MS = 18_000;
 const DIRECT_TIMEOUT_MS = 12_000;
 const READER_TIMEOUT_MS = 20_000;
 const JINA_KEY_STORAGE = "rml:jina-reader-key";
-const MARKETPLACE_RELAY_CONCURRENCY = 4;
+const MARKETPLACE_RELAY_CONCURRENCY = 3;
 let marketplaceRelayActive = 0;
 const marketplaceRelayQueue: Array<() => void> = [];
 
@@ -100,6 +101,9 @@ const CORS_BLOCKED_MARKETPLACE_HOSTS = [
   "ebay.com",
   "mercari.com",
   "facebook.com",
+  "superbuy.com",
+  "goofish.com",
+  "2.taobao.com",
 ] as const;
 
 function hostnameMatches(hostname: string, domain: string) {
@@ -197,20 +201,25 @@ export function frontendMarketplaceUrls(
     ];
   }
   if (marketplace === "JDirectItems Auction") return [
-    `https://zenmarket.jp/en/search.aspx?q=${q}&p=${p}&searchMode=custom&stores=28`,
     `https://zenmarket.jp/en/yahoo.aspx?q=${q}&p=${p}`,
+    `https://zenmarket.jp/en/search.aspx?q=${q}&p=${p}&searchMode=custom&stores=28`,
     `https://auctions.yahoo.co.jp/search/search?p=${q}&b=${page * 50 + 1}&n=50`,
   ];
   if (marketplace === "Rakuten") return [
+    `https://zenmarket.jp/en/rakuten.aspx?q=${q}&p=${p}`,
     `https://zenmarket.jp/en/search.aspx?q=${q}&p=${p}&searchMode=custom&stores=0`,
     `https://search.rakuten.co.jp/search/mall/${q}/?p=${p}`,
   ];
   if (marketplace === "Rakuten Rakuma") return [
-    `https://zenmarket.jp/en/search.aspx?q=${q}&p=${p}&searchMode=custom&stores=25`,
     `https://zenmarket.jp/en/rakuma.aspx?q=${q}&p=${p}`,
+    `https://zenmarket.jp/en/search.aspx?q=${q}&p=${p}&searchMode=custom&stores=25`,
     `https://fril.jp/s?query=${q}&page=${p}`,
   ];
   if (marketplace === "Bunjang") return [`https://globalbunjang.com/search?q=${q}&page=${p}`];
+  if (marketplace === "Goofish") return [
+    `https://www.superbuy.com/en/page/search/?nTag=Home-search&from=search-input&keyword=${q}`,
+    `https://www.goofish.com/search?q=${q}`,
+  ];
   return [MARKETPLACE_INFO[marketplace].search(query)];
 }
 
@@ -547,12 +556,22 @@ function walkJson(value: unknown, visit: (record: Record<string, unknown>) => vo
   }
 }
 
-function recordText(record: Record<string, unknown>, keys: string[]) {
+function recordValue(record: Record<string, unknown>, keys: string[]) {
   for (const key of keys) {
-    const value = record[key];
-    if (typeof value === "string" && value.trim()) return value.trim();
-    if (typeof value === "number" && Number.isFinite(value)) return String(value);
+    if (record[key] !== undefined && record[key] !== null) return record[key];
   }
+  const entries = new Map(Object.entries(record).map(([key, value]) => [key.toLowerCase(), value]));
+  for (const key of keys) {
+    const value = entries.get(key.toLowerCase());
+    if (value !== undefined && value !== null) return value;
+  }
+  return undefined;
+}
+
+function recordText(record: Record<string, unknown>, keys: string[]) {
+  const value = recordValue(record, keys);
+  if (typeof value === "string" && value.trim()) return value.trim();
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
   return "";
 }
 
@@ -561,6 +580,40 @@ function marketplaceRecordWithUrl(
   marketplace: Marketplace,
 ) {
   const enriched = { ...record };
+  const assignAlias = (target: string, keys: string[]) => {
+    if (enriched[target] !== undefined && enriched[target] !== null && String(enriched[target]).trim()) return;
+    const value = recordValue(record, keys);
+    if (value !== undefined && value !== null && String(value).trim()) enriched[target] = value;
+  };
+  assignAlias("title", ["ClearTitle", "ItemTitle", "ProductTitle", "TranslatedTitle", "GoodsName", "Name"]);
+  assignAlias("itemCode", ["ItemCode", "ProductCode", "AuctionId", "WatchCode"]);
+  assignAlias("imageUrl", ["PreviewImageUrl", "ImageUrl", "ImageURL", "ThumbnailUrl", "ItemImage"]);
+  assignAlias("description", ["Description", "ItemDescription", "StoreName"]);
+  assignAlias("storeId", ["StoreId", "StoreID", "ShopId"]);
+  assignAlias("storeName", ["StoreName", "Marketplace", "Source"]);
+  const priceControl = recordText(record, ["PriceTextControl", "priceTextControl", "PriceHtml", "priceHtml"]);
+  if (!recordValue(enriched, ["price", "currentPrice", "priceValue"]) && priceControl) {
+    const dataPrices: Array<[string, RegExp]> = [
+      ["JPY", /data-(?:jpy|yen)=["']([\d,.]+)["']/i],
+      ["USD", /data-(?:usd|dollar)=["']([\d,.]+)["']/i],
+      ["EUR", /data-eur=["']([\d,.]+)["']/i],
+    ];
+    for (const [currency, pattern] of dataPrices) {
+      const amount = Number.parseFloat(priceControl.match(pattern)?.[1]?.replaceAll(",", "") || "0");
+      if (Number.isFinite(amount) && amount > 0) {
+        enriched.price = amount;
+        enriched.currency = currency;
+        break;
+      }
+    }
+    if (!enriched.price) {
+      const parsed = priceFromPublicText(priceControl.replace(/<[^>]+>/g, " "));
+      if (parsed.amount) {
+        enriched.price = parsed.amount;
+        enriched.currency = parsed.currency || "JPY";
+      }
+    }
+  }
   if (marketplace === "Grailed") {
     const prettyPath = recordText(enriched, ["pretty_path", "prettyPath"]);
     if (!recordText(enriched, ["url", "web_url", "path"]) && prettyPath) enriched.url = prettyPath;
@@ -586,11 +639,11 @@ function marketplaceRecordWithUrl(
   if (existing) return enriched;
 
   const id = recordText(enriched, [
-    "itemCode", "item_code", "auctionId", "auction_id", "productId", "product_id",
+    "itemCode", "ItemCode", "item_code", "productCode", "ProductCode", "auctionId", "AuctionId", "auction_id", "productId", "product_id",
     "itemId", "item_id", "objectID", "id",
   ]);
-  const storeId = recordText(enriched, ["storeId", "store_id", "shopId", "shop_id"]);
-  const storeName = recordText(enriched, ["storeName", "store_name", "store", "source", "marketplace"]);
+  const storeId = recordText(enriched, ["storeId", "StoreId", "store_id", "shopId", "shop_id"]);
+  const storeName = recordText(enriched, ["storeName", "StoreName", "store_name", "store", "source", "marketplace"]);
   if (!id) return enriched;
 
   if (marketplace === "Grailed") {
@@ -638,19 +691,18 @@ function canonicalListingUrl(value: string, marketplace: Marketplace, base: stri
         && [...parsed.searchParams.keys()].some((key) => /item|code|id/i.test(key));
       if (!directMercari && !zenMarketMercari) return "";
       if (directMercari) parsed.search = "";
-    } else if (marketplace === "Rakuten"
-    && (storeId === "0" || /rakuten/i.test(storeName) || (!storeId && !storeName))) {
+    } else if (marketplace === "Rakuten") {
       const valid = (hostMatches("zenmarket.jp") && /rakutenproduct\.aspx/i.test(path))
         || (host === "item.rakuten.co.jp" && path.split("/").filter(Boolean).length >= 2);
       if (!valid) return "";
-    } else if (marketplace === "JDirectItems Auction"
-    && (storeId === "28" || /auction|yahoo|jdirect/i.test(storeName) || (!storeId && !storeName))) {
-      const valid = (hostMatches("zenmarket.jp") && /(?:auction|yahoo).*\.aspx/i.test(path))
+    } else if (marketplace === "JDirectItems Auction") {
+      const valid = (hostMatches("zenmarket.jp") && /(?:auction|yahoo).*\.aspx/i.test(path)
+          && [...parsed.searchParams.keys()].some((key) => /item|code|id|auction/i.test(key)))
         || (hostMatches("auctions.yahoo.co.jp") && /\/auction\//i.test(path));
       if (!valid) return "";
-    } else if (marketplace === "Rakuten Rakuma"
-    && (storeId === "25" || /rakuma|fril/i.test(storeName) || (!storeId && !storeName))) {
-      const valid = (hostMatches("zenmarket.jp") && /rakuma.*\.aspx/i.test(path))
+    } else if (marketplace === "Rakuten Rakuma") {
+      const valid = (hostMatches("zenmarket.jp") && /rakuma.*\.aspx/i.test(path)
+          && [...parsed.searchParams.keys()].some((key) => /item|code|id/i.test(key)))
         || (host === "item.fril.jp" && path.length > 1)
         || (hostMatches("fril.jp") && /\/(?:shop|item)\//i.test(path));
       if (!valid) return "";
@@ -677,6 +729,14 @@ function marketplaceImage(value: string, marketplace: Marketplace, base: string)
     if (marketplace === "Depop") {
       if (/assets\.depop\.com/.test(host) || /(?:logo|favicon|qr|avatar|badge)/.test(path)) return "";
       if (!/(?:media-photos|media|images)\.depop\.com$/.test(host) && !host.endsWith(".depop.com")) return "";
+    }
+    if (marketplace === "Grailed") {
+      if (/(?:logo|favicon|avatar|badge|misc)/.test(path)) return "";
+      const grailedImageHost = [
+        "media-assets.grailed.com", "media.grailed.com", "cdn-images.grailed.com",
+        "images.grailed.com", "process.fs.grailed.com",
+      ].some((domain) => host === domain || host.endsWith(`.${domain}`));
+      if (!grailedImageHost) return "";
     }
     return parsed.toString();
   } catch {
@@ -1053,26 +1113,38 @@ function parseMarkdown(text: string, marketplace: Marketplace, base: string) {
 function parseResponse(response: TextResponse, marketplace: Marketplace) {
   const source = response.text.trim();
   if (!source) return [];
+  const normalizedSource = source.replaceAll("\u002F", "/").replaceAll("\u0026", "&")
+    .replaceAll("\/", "/").replaceAll("&amp;", "&");
   const output: Partial<Listing>[] = [];
   if (marketplace === "Depop") {
-    // Depop sometimes returns card markup in a readable/serialized form even
-    // when the response advertises HTML. Parse those cards before the generic
-    // DOM and embedded React-state passes.
     output.push(...depopMarkdownListings(source, response.url));
   }
   if (/json/i.test(response.contentType) || /^[\[{]/.test(source)) {
     try {
-      output.push(...recordsFromJson(JSON.parse(source), marketplace, response.url));
+      let payload: unknown = JSON.parse(source);
+      if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+        const wrapped = recordValue(payload as Record<string, unknown>, ["d", "data", "result"]);
+        if (typeof wrapped === "string" && /^[\[{]/.test(wrapped.trim())) {
+          try { payload = JSON.parse(wrapped); } catch { /* keep outer JSON */ }
+        }
+      }
+      if (["Mercari Japan", "JDirectItems Auction", "Rakuten", "Rakuten Rakuma"].includes(marketplace)) {
+        output.push(...zenMarketCatalogRecords(payload, marketplace as "Mercari Japan" | "JDirectItems Auction" | "Rakuten" | "Rakuten Rakuma")
+          .map((record) => partialFromRecord(record, marketplace, response.url)).filter(Boolean) as Partial<Listing>[]);
+      }
+      output.push(...recordsFromJson(payload, marketplace, response.url));
     } catch {
-      // Continue with HTML/markdown parsing.
+      // Continue with page-source parsing.
     }
   }
   if (/<(?:!doctype|html|body|script|a)\b/i.test(source)) {
     output.push(...parseHtml(source, marketplace, response.url));
   } else {
-    output.push(...parseMarkdown(source, marketplace, response.url));
-    output.push(...parseEmbeddedSourceLinks(source, marketplace, response.url));
+    output.push(...parseMarkdown(normalizedSource, marketplace, response.url));
   }
+  // Always inspect serialized/escaped product paths. React HTML often contains
+  // valid listing records even when no matching anchor is server-rendered.
+  output.push(...parseEmbeddedSourceLinks(normalizedSource, marketplace, response.url));
   return output;
 }
 
@@ -1130,17 +1202,20 @@ async function hydrateListingPages(
   listings: Partial<Listing>[],
   marketplace: Marketplace,
   signal?: AbortSignal,
+  options: { maxCandidates?: number; maxWorkers?: number } = {},
 ) {
+  const maxCandidates = Math.max(0, options.maxCandidates ?? 4);
+  const maxWorkers = Math.max(1, options.maxWorkers ?? 3);
   const candidates = listings.filter((listing) => listing.url && (
     !listing.image || Number(listing.price) <= 0 || !listing.description
     || listing.brand === "Unspecified" || listing.size === "Unknown"
-  )).slice(0, 4);
+  )).slice(0, maxCandidates);
   if (!candidates.length) return { listings, hydrated: 0, transports: [] as string[] };
 
   const updates = new Map<string, Partial<Listing>>();
   const transports = new Set<string>();
   let cursor = 0;
-  const workers = Array.from({ length: Math.min(3, candidates.length) }, async () => {
+  const workers = Array.from({ length: Math.min(maxWorkers, candidates.length) }, async () => {
     while (cursor < candidates.length) {
       const index = cursor;
       cursor += 1;
@@ -1168,37 +1243,99 @@ async function hydrateListingPages(
   return { listings: merged, hydrated, transports: [...transports] };
 }
 
+const ZENMARKET_BACKED = new Set<Marketplace>([
+  "Mercari Japan", "JDirectItems Auction", "Rakuten", "Rakuten Rakuma",
+]);
+
+async function frontendZenMarketCatalogFetch(
+  marketplace: Marketplace,
+  query: string,
+  page: number,
+  signal?: AbortSignal,
+): Promise<TextResponse | null> {
+  if (!ZENMARKET_BACKED.has(marketplace)) return null;
+  return withMarketplaceRelaySlot(async () => {
+    const merged = mergeAbortSignals(signal, DIRECT_TIMEOUT_MS + 5_000);
+    try {
+      const response = await fetch("/api/zenmarket-search", {
+        method: "POST",
+        credentials: "same-origin",
+        cache: "no-store",
+        signal: merged.signal,
+        headers: { "content-type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ marketplace, query, page }),
+      });
+      const text = (await response.text()).slice(0, MAX_RESPONSE_CHARS);
+      if (!response.ok) return null;
+      const payload = JSON.parse(text) as { ok?: boolean; partial?: boolean; data?: unknown; sourceUrl?: string };
+      if (!payload.ok || payload.data === undefined || payload.data === null) return null;
+      return {
+        ok: true,
+        status: 200,
+        url: payload.sourceUrl || frontendMarketplaceUrls(marketplace, query, page)[0],
+        contentType: "application/json",
+        text: JSON.stringify(payload.data),
+        transport: "frontend-api",
+      };
+    } catch {
+      return null;
+    } finally {
+      merged.cleanup();
+    }
+  });
+}
+
 export async function searchMarketplaceFrontend(input: {
   marketplace: Marketplace;
   query: string;
   page?: number;
   mode?: "active" | "sold";
   signal?: AbortSignal;
+  scanMode?: "standard" | "all-markets";
 }): Promise<FrontendMarketplaceResult> {
-  const { marketplace, query, page = 0, mode = "active", signal } = input;
+  const { marketplace, query, page = 0, mode = "active", signal, scanMode = "standard" } = input;
   const urls = frontendMarketplaceUrls(marketplace, query, page, mode);
-  const requestLimit = ["Depop", "Mercari Japan", "JDirectItems Auction", "Rakuten Rakuma"].includes(marketplace) ? 3 : 2;
-  const attempts = await Promise.allSettled(urls.slice(0, requestLimit).map(async (url) => {
-    const responses: TextResponse[] = [];
-    const response = await fetchReadableText(url, signal);
-    responses.push(response);
-    let listings = parseResponse(response, marketplace);
+  const allMarketsMode = scanMode === "all-markets";
+  const requestLimit = allMarketsMode
+    ? (["Depop", "Mercari Japan", "JDirectItems Auction", "Rakuten", "Rakuten Rakuma"].includes(marketplace) ? 2 : 1)
+    : (["Depop", "Mercari Japan", "JDirectItems Auction", "Rakuten", "Rakuten Rakuma"].includes(marketplace) ? 3 : 2);
+  const values: Array<{ response: TextResponse; responses: TextResponse[]; listings: Partial<Listing>[] }> = [];
+  const rejected: string[] = [];
 
-    // A successful Depop HTML relay can still be only the JavaScript shell.
-    // In that case read the same official URL through the public readable-page
-    // representation, whose numbered cards include product links, prices, sizes
-    // and first-party media-photos.depop.com images.
-    if (marketplace === "Depop" && !listings.length && response.transport !== "reader" && jinaApiKey()) {
+  // ZenMarket's catalog response is compact and already contains paired item
+  // codes, titles, images and price markup. Try it once, then use ordinary page
+  // sources only when it returns no cards.
+  const zenCatalog = await frontendZenMarketCatalogFetch(marketplace, query, page, signal);
+  if (zenCatalog) {
+    const listings = parseResponse(zenCatalog, marketplace);
+    values.push({ response: zenCatalog, responses: [zenCatalog], listings });
+  }
+
+  const hasCatalogCards = values.some((entry) => entry.listings.length > 0);
+  if (!hasCatalogCards) {
+    // Run fallback pages sequentially within one marketplace. The outer search
+    // still processes several marketplaces together, but this prevents one
+    // marketplace from producing a burst of redundant page requests.
+    for (const url of urls.slice(0, requestLimit)) {
       try {
-        const reader = await readerFetchText(url, signal);
-        responses.push(reader);
-        listings = parseResponse(reader, marketplace);
-      } catch { /* preserve the official page response */ }
+        const responses: TextResponse[] = [];
+        const response = await fetchReadableText(url, signal);
+        responses.push(response);
+        let listings = parseResponse(response, marketplace);
+        if (marketplace === "Depop" && !listings.length && response.transport !== "reader" && jinaApiKey()) {
+          try {
+            const reader = await readerFetchText(url, signal);
+            responses.push(reader);
+            listings = parseResponse(reader, marketplace);
+          } catch { /* preserve the official page response */ }
+        }
+        values.push({ response, responses, listings });
+        if (listings.length >= 8) break;
+      } catch (error) {
+        rejected.push(error instanceof Error ? error.message : "Request blocked");
+      }
     }
-    return { response, responses, listings };
-  }));
-
-  const values = attempts.flatMap((attempt) => attempt.status === "fulfilled" ? [attempt.value] : []);
+  }
 
   if (marketplace === "Grailed") {
     const config = values.map((entry) => parseGrailedPublicConfig(entry.response.text)).find(Boolean)
@@ -1214,7 +1351,10 @@ export async function searchMarketplaceFrontend(input: {
   }
 
   const searchListings = dedupeListings(values.flatMap((entry) => entry.listings));
-  const hydrated = await hydrateListingPages(searchListings, marketplace, signal);
+  const hydrated = await hydrateListingPages(searchListings, marketplace, signal, {
+    maxCandidates: allMarketsMode ? 1 : 4,
+    maxWorkers: allMarketsMode ? 1 : 3,
+  });
   const listings = dedupeListings(hydrated.listings);
   const transport = [...new Set([
     ...values.flatMap((entry) => entry.responses.map((response) => response.transport)),
@@ -1241,12 +1381,9 @@ export async function searchMarketplaceFrontend(input: {
     };
   }
 
-  const rejected = attempts.flatMap((attempt) => attempt.status === "rejected"
-    ? [attempt.reason instanceof Error ? attempt.reason.message : "Request blocked"]
-    : []);
   return {
     marketplace,
-    status: rejected.length === attempts.length ? "unavailable" : "unavailable",
+    status: "unavailable",
     message: `The frontend marketplace-results API and browser fallbacks could not read ${marketplace}'s listing data. Open the live search page directly${extensionBridgeAvailable() ? "; the browser bridge responded but no product cards were readable" : ", or install the included browser bridge for CORS-blocked marketplaces"}.`,
     sourceUrl,
     listings: [],

@@ -177,10 +177,12 @@ export function normalizePublicListingRecord(
     || (["Mercari Japan", "JDirectItems Auction", "Rakuten", "Rakuten Rakuma"].includes(marketplace) ? "JPY"
       : marketplace === "Bunjang" ? "KRW" : marketplace === "Goofish" ? "CNY" : "USD");
   const title = text(record.name) || text(record.title) || text(record.display_title)
+    || text(record.ClearTitle) || text(record.clearTitle) || text(record.TranslatedTitle)
     || text(record.product_name) || text(record.productName) || text(record.itemName)
-    || text(record.item_name) || text(record.auctionTitle) || text(record.productTitle)
+    || text(record.ItemTitle) || text(record.item_name) || text(record.auctionTitle) || text(record.productTitle)
     || text(record.itemTitle) || text(record.subject);
-  const recordId = text(record.itemId) || text(record.item_id) || text(record.productId)
+  const recordId = text(record.itemId) || text(record.ItemCode) || text(record.itemCode)
+    || text(record.item_id) || text(record.productId) || text(record.ProductCode)
     || text(record.product_id) || text(record.objectID) || text(record.id);
   const generatedUrl = marketplace === "Goofish" && recordId
     ? `https://www.goofish.com/item?id=${encodeURIComponent(recordId)}`
@@ -213,9 +215,9 @@ export function normalizePublicListingRecord(
   const description = text(record.description) || text(record.localizedDescription)
     || text(record.originalDescription) || text(record.shortDescription)
     || text(record.itemDescription) || text(record.item_description);
-  const imageRaw = record.image || record.imageUrl || record.image_url || record.cover_image
-    || record.cover_photo || record.coverPhoto
-    || record.thumbnail || record.thumbnailUrl || record.thumbnail_url || record.imagePath
+  const imageRaw = record.image || record.imageUrl || record.ImageUrl || record.PreviewImageUrl
+    || record.image_url || record.cover_image || record.cover_photo || record.coverPhoto
+    || record.thumbnail || record.thumbnailUrl || record.ThumbnailUrl || record.thumbnail_url || record.imagePath
     || record.thumbnails || record.pictures || record.images || record.photos;
   const image = genericImage(imageRaw, pageUrl);
   const displayTitle = title;

@@ -3276,20 +3276,22 @@ function BrowseView({
     })));
 
     try {
-      const selectedResponsesPromise = settleInBatches(requestMarkets, 3, async (marketplace) => {
+      const allMarketsMode = requestMarkets.length >= 6;
+      const selectedResponsesPromise = settleInBatches(requestMarkets, allMarketsMode ? 2 : 3, async (marketplace) => {
         const literalQuery = query.trim() || (category === "All clothing" ? "clothing" : category);
         const queries = [...new Set(
-          [literalQuery, ...aiSearchQueries]
+          (allMarketsMode ? [literalQuery] : [literalQuery, ...aiSearchQueries])
             .map((value) => value.trim())
             .filter(Boolean),
-        )].slice(0, requestMarkets.length >= 6 ? 2 : 4);
+        )].slice(0, allMarketsMode ? 1 : 4);
 
-        const attempts = await settleInBatches(queries, requestMarkets.length >= 6 ? 1 : 2, async (plannedQuery) => {
+        const attempts = await settleInBatches(queries, allMarketsMode ? 1 : 2, async (plannedQuery) => {
           return searchMarketplaceFrontend({
             marketplace,
             query: [plannedQuery, category === "All clothing" ? "" : category].filter(Boolean).join(" "),
             page: requestedPage,
             signal: controller.signal,
+            scanMode: allMarketsMode ? "all-markets" : "standard",
           });
         });
 
@@ -3707,33 +3709,41 @@ function BrowseView({
         {marketSelectionMessage && hasSelectedRequestMarkets && (
           <p className="market-selection-warning" role="status">{marketSelectionMessage}</p>
         )}
-        <div className="market-selection-actions" aria-label="Marketplace selection actions">
-          <button
-            type="button"
-            className="secondary-button"
-            onClick={() => {
-              setSelectedMarkets([...MARKETPLACES]);
-              setInternationalSection(true);
-              setMarketSelectionMessage("All supported marketplaces are selected. The scan will use bounded concurrency.");
-            }}
-          >
-            Select all markets
-          </button>
-          <button
-            type="button"
-            className="secondary-button"
-            onClick={() => {
-              setSelectedMarkets([]);
-              setAiWebSearchSelected(false);
-              setMarketSelectionMessage("Marketplace selection cleared.");
-            }}
-          >
-            Clear selection
-          </button>
-          <small>One search action covers every selected market; requests are queued in small groups to prevent overload.</small>
-        </div>
-        <div className="query-options">
-          <span>Default marketplaces</span>
+        <div className="market-selection-panel">
+          <div className="market-selection-actions" aria-label="Marketplace selection actions">
+            <div className="market-selection-copy">
+              <strong>Marketplace selection</strong>
+              <p className="market-selection-note">
+                Choose the marketplaces below. One search runs them in small, controlled batches.
+              </p>
+            </div>
+            <div className="market-selection-buttons">
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => {
+                  setSelectedMarkets([...MARKETPLACES]);
+                  setInternationalSection(true);
+                  setMarketSelectionMessage("All supported marketplaces are selected. The scan will use bounded concurrency.");
+                }}
+              >
+                Select all markets
+              </button>
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => {
+                  setSelectedMarkets([]);
+                  setAiWebSearchSelected(false);
+                  setMarketSelectionMessage("Marketplace selection cleared.");
+                }}
+              >
+                Clear selection
+              </button>
+            </div>
+          </div>
+          <div className="query-options default-query-options">
+            <span>Default marketplaces</span>
           {RESALE_MARKETPLACES.map((marketplace) => (
             <label key={marketplace}>
               <input type="checkbox" checked={selectedMarkets.includes(marketplace)}
@@ -3741,11 +3751,12 @@ function BrowseView({
               {marketplace}
             </label>
           ))}
-          <label className="favorites-priority-toggle">
-            <input type="checkbox" checked={favoritesFirst}
-              onChange={(event) => setFavoritesFirst(event.target.checked)} />
-            Prioritize favorites and similar pieces
-          </label>
+            <label className="favorites-priority-toggle">
+              <input type="checkbox" checked={favoritesFirst}
+                onChange={(event) => setFavoritesFirst(event.target.checked)} />
+              Prioritize favorites and similar pieces
+            </label>
+          </div>
         </div>
       </section>
 

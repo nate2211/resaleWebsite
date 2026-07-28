@@ -41,12 +41,12 @@ test("Depop and ZenMarket Mercari use official search and listing page sources",
 test("one all-market action uses bounded marketplace and relay concurrency", async () => {
   const client = await read("app/lib/frontend-marketplaces.ts");
   const page = await read("app/page.tsx");
-  assert.match(client, /MARKETPLACE_RELAY_CONCURRENCY = 4/);
+  assert.match(client, /MARKETPLACE_RELAY_CONCURRENCY = 3/);
   assert.match(client, /withMarketplaceRelaySlot/);
   assert.match(page, /Select all markets/);
   assert.match(page, /setSelectedMarkets\(\[\.\.\.MARKETPLACES\]\)/);
-  assert.match(page, /settleInBatches\(requestMarkets, 3/);
-  assert.match(page, /requestMarkets\.length >= 6 \? 2 : 4/);
-  assert.match(page, /requestMarkets\.length >= 6 \? 1 : 2/);
+  assert.match(page, /settleInBatches\(requestMarkets, allMarketsMode \? 2 : 3/);
+  assert.match(page, /allMarketsMode \? \[literalQuery\]/);
+  assert.match(page, /scanMode: allMarketsMode \? "all-markets" : "standard"/);
   assert.match(page, /Promise\.allSettled/);
 });

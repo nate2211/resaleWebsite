@@ -13,9 +13,9 @@ The Cloudflare zone for `cloud-cord.com` must be active in the same account. `wr
 
 No Browser Run binding is used. Marketplace adapters use bounded official page-source/index requests, while image analysis and optional local AI models execute in the visitor's browser.
 
-## v14 production behavior
+## v16 production behavior
 
 - Complete navigation remains visible on wider screens and becomes a three-bar dropdown below 1120px.
-- Search All processes at most three marketplaces per orchestration batch.
-- The browser-side relay scheduler permits at most four concurrent `/api/listings` requests.
-- Depop uses official search/brand/theme/product pages; Mercari Japan uses ZenMarket Mercari and store `27` pages.
+- Search All processes two marketplaces per orchestration batch when all supported marketplaces are selected; smaller selections use batches of three.
+- The browser-side relay scheduler permits at most three concurrent marketplace relay requests.
+- Depop uses official search/brand/theme/product sources; ZenMarket retries dedicated and unified store endpoints for Mercari `27`, JDirectItems `28`, Rakuten `0`, and Rakuma `25`; Grailed uses its bounded public listing index and approved image CDNs.

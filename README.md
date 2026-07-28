@@ -1,15 +1,17 @@
-# ResaleMasterLab production navigation and marketplace v14
+# ResaleMasterLab all-market image and result recovery v16
 
-This release keeps every v13 production feature and adds a complete responsive navigation bar on every page, official Depop and ZenMarket Mercari page-source recovery, and bounded all-market search orchestration.
+This release keeps every production feature from v15 and fixes the marketplace selector, all-market scheduling, Depop recovery, ZenMarket store adapters, Grailed image extraction, and analysis-ready marketplace images.
 
-## v14 changes
+## v16 changes
 
 - Full navigation links on the workspace, public pages, Thrift Check, Listing Template, and the 404 page.
 - Desktop navigation stays visible; smaller screens use a three-bar button and accessible dropdown.
 - Depop uses its normal `search`, `brands`, `theme`, and `/products/` page sources, including embedded React/JSON records and `media-photos.depop.com` images.
-- Mercari Japan uses ZenMarket's normal Mercari tab, cross-site `stores=27` query, and `mercariproduct.aspx?itemCode=...` listing pages.
-- A single Search All action includes every selected marketplace but limits marketplace groups to three and raw relay requests to four at a time.
-- When six or more marketplaces are selected, query expansions are reduced and processed sequentially per marketplace to avoid Worker and upstream request spikes.
+- Mercari Japan uses ZenMarket's Mercari catalog/page sources, store `27`, and `mercariproduct.aspx?itemCode=...` listing pages.
+- JDirectItems Auction, Rakuten, and Rakuma use stores `28`, `0`, and `25`, dedicated pages, cross-site pages, nested AJAX payloads, and canonical ZenMarket product links.
+- The marketplace selector uses a two-column compact toolbar on wide screens and a clean stacked layout on phones; helper text wraps normally without forced widths or stretched whitespace.
+- A single Search All action includes every selected marketplace but uses groups of two when every marketplace is selected and limits raw relay requests to three at a time.
+- When six or more marketplaces are selected, only the literal search is used, product-page enrichment is limited to one item per marketplace, and fallback pages are processed sequentially.
 
 Production domain: `https://resalemasterlab.cloud-cord.com`
 
@@ -27,12 +29,12 @@ This package retains the v12 official marketplace page-source adapters, engageme
 
 ## Marketplace evidence
 
-Marketplace search behavior remains from v12:
+Marketplace search behavior combines the proven earlier adapters with the current bounded frontend scheduler:
 
 - Depop official search/brand/theme sources and canonical product-page enrichment.
 - Grailed active and sold public indexes.
 - Poshmark normal listing search.
-- ZenMarket: Mercari Japan `27`, JDirectItems `28`, Rakuten `0`, Rakuma `25`.
+- ZenMarket: Mercari Japan `27`, JDirectItems `28`, Rakuten `0`, Rakuma `25`. The frontend accepts rendered `product-item product-link` cards, nested `.d` JSON payloads, `Items` arrays, `ItemCode`, `ClearTitle`, `PreviewImageUrl`, and `PriceTextControl`.
 - Partial failures use settled-result handling.
 - Browser Run is not configured.
 

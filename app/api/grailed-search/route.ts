@@ -1,7 +1,7 @@
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
-const WORKER_REVISION = "production-navigation-markets-v14";
+const WORKER_REVISION = "all-market-images-production-v16";
 const TOTAL_TIMEOUT_MS = 11_000;
 const PER_HOST_TIMEOUT_MS = 3_500;
 const MAX_RESPONSE_BYTES = 2_000_000;

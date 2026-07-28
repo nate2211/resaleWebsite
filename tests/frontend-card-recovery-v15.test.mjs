@@ -25,7 +25,7 @@ test("market selector uses a compact responsive panel without the old forced tex
   assert.match(page, /market-selection-panel/);
   assert.match(page, /market-selection-buttons/);
   assert.match(page, /market-selection-note/);
-  assert.match(css, /grid-template-columns: max-content minmax\(0, 1fr\)/);
+  assert.match(css, /grid-template-columns: minmax\(0, 1fr\) auto/);
   assert.doesNotMatch(css, /market-selection-actions small[\s\S]{0,160}flex:\s*1 1 300px/);
 });
 
@@ -78,7 +78,9 @@ test("ZenMarket catalog relay is bounded and degrades to a partial HTTP 200", as
   assert.match(route, /rakuten\.aspx\/getProducts/);
   assert.match(route, /rakuma\.aspx\/getProducts/);
   assert.match(route, /yahoo\.aspx\/getProducts/);
-  assert.match(route, /TIMEOUT_MS = 11_000/);
+  assert.match(route, /TOTAL_TIMEOUT_MS = 12_000/);
+  assert.match(route, /ATTEMPT_TIMEOUT_MS = 4_500/);
+  assert.match(route, /search\.aspx\/GetProducts/);
   assert.match(route, /partial: true/);
   assert.match(route, /Response\.json/);
 });

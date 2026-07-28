@@ -83,39 +83,54 @@ function depopSize(lines: string[]) {
   return lines.find((line) => sizePattern.test(line)) || "Unknown";
 }
 
-/** Parse the image-wrapped numbered cards returned by Depop's readable page source. */
+/** Parse Depop cards from readable Markdown, serialized React text, or plain page-source links. */
 export function parseDepopReaderMarkdown(source: string): DepopReaderRecord[] {
-  const text = source.replace(/\r\n?/g, "\n");
+  const text = source.replace(/\r\n?/g, "\n")
+    .replaceAll("\\u002F", "/")
+    .replaceAll("\\u0026", "&")
+    .replaceAll("\\/", "/")
+    .replaceAll("&amp;", "&");
   const output = new Map<string, DepopReaderRecord>();
-  const productLink = /\]\((https:\/\/(?:www\.)?depop\.com\/products\/[^)\s?#]+\/?(?:\?[^)\s]*)?)\)/gi;
+  const candidates = [
+    ...text.matchAll(/https?:\/\/(?:www\.)?depop\.com\/products\/[a-z0-9_-]+\/?(?:\?[^)\s"'<>]*)?/gi),
+    ...text.matchAll(/(?<![a-z0-9])\/products\/[a-z0-9_-]+\/?/gi),
+  ].sort((a, b) => (a.index || 0) - (b.index || 0));
 
-  for (const match of text.matchAll(productLink)) {
-    const rawUrl = match[1];
+  for (const match of candidates) {
+    const rawUrl = match[0];
     const url = canonicalDepopUrl(rawUrl);
-    if (!url || output.has(url)) continue;
+    if (!url || output.has(url) || /\/products\/create\//i.test(url)) continue;
     const matchIndex = match.index || 0;
-    const start = lastItemMarker(text, matchIndex);
-    const end = nextItemMarker(text, matchIndex + match[0].length);
+    const markerStart = lastItemMarker(text, matchIndex);
+    const markerEnd = nextItemMarker(text, matchIndex + match[0].length);
+    const hasNearbyMarker = markerStart > 0 || /(?:^|\n)\s*\d+\.\s+/.test(text.slice(0, Math.min(text.length, matchIndex + 1)));
+    const start = hasNearbyMarker ? markerStart : Math.max(0, matchIndex - 2_000);
+    const end = hasNearbyMarker ? markerEnd : Math.min(text.length, matchIndex + 3_500);
     const block = text.slice(start, end);
     const image = bestDepopImage(block);
 
+    const markdownLabel = block.match(new RegExp(`\\[([^\\]]{3,320})\\]\\([^)]*${url.split('/products/')[1].replace(/[.*+?^${}()|[\\]\\]/g, "\\$&").replace(/\/$/, "")}`, "i"))?.[1] || "";
     const title = cleanText(
       block.match(/!\[(?:Image\s+\d+:\s*)?([^\]]{3,320})\]\(https:\/\/media-photos\.depop\.com\//i)?.[1]
         || block.match(/!\[([^\]]{3,320})\]\(https:\/\/media-photos\.depop\.com\//i)?.[1]
+        || block.match(/"(?:display_?title|product_?name|item_?name|title|name)"\s*:\s*"([^"\n]{3,320})"/i)?.[1]
+        || block.match(/(?:aria-label|title|alt)\s*=\s*["']([^"']{3,320})["']/i)?.[1]
+        || markdownLabel
         || "Depop listing",
     );
 
-    const tailStart = Math.max(0, block.indexOf(match[0]) + match[0].length);
-    const tail = block.slice(tailStart);
-    const lines = tail.split(/\n+/).map(cleanText).filter(Boolean);
-    const prices = [...tail.matchAll(/(?:US\$|\$)\s*([\d,.]+)/gi)]
+    const afterLink = block.slice(Math.max(0, block.indexOf(rawUrl) + rawUrl.length));
+    const lines = afterLink.split(/\n+/).map(cleanText).filter(Boolean);
+    const prices = [...block.matchAll(/(?:US\$|\$)\s*([\d,.]+)/gi)]
       .map((priceMatch) => Number.parseFloat(priceMatch[1].replaceAll(",", "")))
       .filter((value) => Number.isFinite(value) && value > 0);
     const price = prices.at(-1) || 0;
     const size = depopSize(lines);
-    const brand = lines.find((line) => !/^(?:US\$|\$|\d+[,.]?\d*)/.test(line)
-      && line !== size && line.length <= 80 && !/^(?:Loading|Filter|Sort|Feedback)$/i.test(line)) || "Unspecified";
-    const description = cleanText(tail).slice(0, 900);
+    const brandCandidate = lines.find((line) => !/^(?:US\$|\$|\d+[,.]?\d*)/.test(line)
+      && line !== size && line.length <= 80
+      && !/^(?:Loading|Filter|Sort|Feedback|Buy now|Make offer|Add to bag)$/i.test(line)) || "Unspecified";
+    const brand = brandCandidate.replace(/^[)\]}>.,;:\-–—\s]+/, "").trim() || "Unspecified";
+    const description = cleanText(block).slice(0, 900);
 
     output.set(url, {
       url,
@@ -172,6 +187,37 @@ function nestedRecord(value: unknown) {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
 }
 
+
+function firstImageValue(value: unknown, depth = 0): string {
+  if (depth > 5 || value === null || value === undefined) return "";
+  if (typeof value === "string") {
+    const text = value.trim();
+    return /^(?:https?:)?\/\//i.test(text) ? text : "";
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = firstImageValue(item, depth + 1);
+      if (found) return found;
+    }
+    return "";
+  }
+  if (typeof value !== "object") return "";
+  const record = value as Record<string, unknown>;
+  for (const key of [
+    "original_url", "originalUrl", "large_url", "largeUrl", "retina_url", "retinaUrl",
+    "url", "src", "image_url", "imageUrl", "secure_url", "secureUrl", "large", "original",
+  ]) {
+    const found = firstImageValue(record[key], depth + 1);
+    if (found) return found;
+  }
+  for (const key of Object.keys(record)) {
+    if (!/(?:photo|image|cover|picture|thumbnail)/i.test(key)) continue;
+    const found = firstImageValue(record[key], depth + 1);
+    if (found) return found;
+  }
+  return "";
+}
+
 /** Convert one Grailed Algolia hit into the generic record shape used by the frontend parser. */
 export function grailedHitToRecord(hit: Record<string, unknown>, mode: "active" | "sold") {
   const id = valueText(hit.id) || valueText(hit.objectID);
@@ -186,8 +232,8 @@ export function grailedHitToRecord(hit: Record<string, unknown>, mode: "active" 
     ? hit.designers.map((value) => valueText(nestedRecord(value)?.name) || valueText(value)).filter(Boolean).join(" × ")
     : "";
   const cover = nestedRecord(hit.cover_photo) || nestedRecord(hit.coverPhoto);
-  const image = valueText(hit.image_url) || valueText(hit.image)
-    || valueText(cover?.url) || valueText(cover?.original_url) || valueText(cover?.originalUrl);
+  const image = firstImageValue(hit.image_url) || firstImageValue(hit.image)
+    || firstImageValue(cover) || firstImageValue(hit.photos) || firstImageValue(hit.images);
   const price = mode === "sold"
     ? valueNumber(hit.sold_price) || valueNumber(hit.soldPrice) || valueNumber(hit.price)
     : valueNumber(hit.price) || valueNumber(hit.current_price) || valueNumber(hit.listing_price);

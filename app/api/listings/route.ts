@@ -1,7 +1,7 @@
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
-const WORKER_REVISION = "production-navigation-markets-v14";
+const WORKER_REVISION = "all-market-images-production-v16";
 const MAX_BODY_BYTES = 5_500_000;
 const UPSTREAM_TIMEOUT_MS = 15_000;
 const MAX_REDIRECTS = 2;
@@ -19,6 +19,9 @@ const ALLOWED_MARKETPLACE_HOSTS = [
   "ebay.com",
   "mercari.com",
   "facebook.com",
+  "superbuy.com",
+  "goofish.com",
+  "2.taobao.com",
 ] as const;
 
 function hostnameMatches(hostname: string, domain: string) {

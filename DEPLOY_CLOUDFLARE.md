@@ -54,7 +54,7 @@ Verify these URLs directly:
 
 The Worker has no Browser Run binding. Marketplace relays remain bounded to one official page per request. The image-comparison proxy is restricted to approved marketplace image CDNs, a 9-second timeout, and a 4.5 MB response limit.
 
-## v14 post-deploy checks
+## v16 post-deploy checks
 
 After deployment, verify the full navigation on `/`, `/thrift-check`, `/listing-template`, `/methodology`, and `/about` at desktop and mobile widths. The narrow layout should expose every link through the three-bar menu.
 
@@ -62,10 +62,10 @@ Run one Search All request and confirm `/api/health` reports:
 
 ```json
 {
-  "revision": "production-navigation-markets-v14",
-  "marketplaceBatchSize": 3,
-  "marketplaceRelayConcurrency": 4,
+  "revision": "all-market-images-production-v16",
+  "marketplaceBatchSize": { "standard": 3, "allMarkets": 2 },
+  "marketplaceRelayConcurrency": 3,
   "depopDiscovery": "official-search-brand-theme-and-product-page-sources",
-  "mercariJapanDiscovery": "zenmarket-mercari-and-store-27-page-sources"
+  "mercariJapanDiscovery": "zenmarket-mercari-store-27-catalog-and-page-sources"
 }
 ```

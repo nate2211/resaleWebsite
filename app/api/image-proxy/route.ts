@@ -6,6 +6,9 @@ const ALLOWED_IMAGE_HOSTS = [
   "media-photos.depop.com",
   "media-assets.grailed.com",
   "media.grailed.com",
+  "cdn-images.grailed.com",
+  "images.grailed.com",
+  "process.fs.grailed.com",
   "i.ebayimg.com",
   "u-mercari-images.mercdn.net",
   "static.mercdn.net",
@@ -15,6 +18,15 @@ const ALLOWED_IMAGE_HOSTS = [
   "img.fril.jp",
   "ccimage.hellomarket.com",
   "img.bunjang.co.kr",
+  "auctions.c.yimg.jp",
+  "item-shopping.c.yimg.jp",
+  "shopping.c.yimg.jp",
+  "di2ponv0v5otw.cloudfront.net",
+  "poshmark.com",
+  "zenmarket.jp",
+  "img.zenmarket.jp",
+  "alicdn.com",
+  "g-search1.alicdn.com",
 ] as const;
 
 function allowedImageUrl(value: string) {

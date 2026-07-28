@@ -7,7 +7,7 @@ export async function POST() {
     listings: [],
     searches: [],
     frontendOnly: true,
-    workerRevision: "production-navigation-markets-v14",
+    workerRevision: "all-market-images-production-v16",
   }, {
     status: 410,
     headers: { "cache-control": "no-store" },
