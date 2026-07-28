@@ -1,4 +1,4 @@
-# Deploy official marketplace page-source v10
+# Deploy Grailed and Depop results v11
 
 Production URL:
 
@@ -36,3 +36,9 @@ npm run build:windows
 npm run deploy
 npm run check:production
 ```
+
+## Grailed and Depop result verification
+
+- `/api/grailed-search` performs one public Algolia listing query using the configuration exposed by Grailed's official page source.
+- Depop first uses its official search, brand, and theme URLs. When those return only a shell, the frontend parses the readable source for canonical `/products/` cards and `media-photos.depop.com` images.
+- Neither path uses Browser Run.

@@ -12,6 +12,9 @@ test("uses official marketplace search pages instead of Depop JSON endpoints", a
   assert.match(client, /https:\/\/www\.depop\.com\/theme\/\$\{slug\}/);
   assert.doesNotMatch(client, /webapi\.depop\.com|api\/v[23]\/search\/products/);
   assert.match(client, /https:\/\/www\.grailed\.com\/shop\?query=/);
+  assert.match(client, /\/api\/grailed-search/);
+  assert.match(client, /parseGrailedPublicConfig/);
+  assert.match(client, /parseDepopReaderMarkdown/);
   assert.match(client, /https:\/\/poshmark\.com\/search\?query=/);
   assert.match(client, /https:\/\/jp\.mercari\.com\/search\?keyword=/);
   assert.match(client, /searchMode=custom&stores=28/);
@@ -34,7 +37,7 @@ test("parses structured page state and hydrates only missing listing fields", as
 
 test("relay returns raw official page source with upstream metadata", async () => {
   const route = await source("app/api/listings/route.ts");
-  assert.match(route, /official-page-source-marketplaces-v10/);
+  assert.match(route, /grailed-depop-results-v11/);
   assert.match(route, /x-rml-upstream-status/);
   assert.match(route, /x-rml-final-url/);
   assert.match(route, /x-rml-upstream-content-type/);

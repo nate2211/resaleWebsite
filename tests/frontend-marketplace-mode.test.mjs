@@ -34,7 +34,7 @@ test("known CORS-blocked hosts are not fetched directly from the page", async ()
 test("health and deployment identify frontend API relay revision", async () => {
   const health = await source("app/api/health/route.ts");
   const wrangler = await source("wrangler.jsonc");
-  assert.match(health, /official-page-source-marketplaces-v10/);
+  assert.match(health, /grailed-depop-results-v11/);
   assert.match(wrangler, /official-page-source-relay/);
   assert.doesNotMatch(wrangler, /"browser"\s*:/i);
 });

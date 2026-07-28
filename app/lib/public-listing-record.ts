@@ -106,7 +106,8 @@ function genericImage(value: unknown, base: string): string {
   }
   const record = objectRecord(value);
   if (!record) return "";
-  for (const key of ["url", "src", "imageUrl", "image_url", "full", "large", "medium", "original", "path"]) {
+  for (const key of ["url", "src", "imageUrl", "image_url", "full", "large", "medium", "original",
+    "original_url", "originalUrl", "large_url", "largeUrl", "medium_url", "mediumUrl", "path"]) {
     const found = genericImage(record[key], base);
     if (found) return found;
   }
@@ -188,7 +189,8 @@ export function normalizePublicListingRecord(
       : marketplace === "Depop" && text(record.slug)
         ? `https://www.depop.com/products/${text(record.slug).replace(/^\/+|\/+$/g, "")}/`
         : "";
-  const explicitUrl = record.url || record.web_url || record.path || record.productUrl || record.product_url
+  const explicitUrl = record.url || record.web_url || record.path || record.pretty_path || record.prettyPath
+    || record.productUrl || record.product_url
     || record.itemUrl || record.item_url || record.detailUrl || record.detail_url
     || record.shareUrl || record.share_url || generatedUrl;
   const rawUrl = absolute(explicitUrl, pageUrl);
@@ -212,6 +214,7 @@ export function normalizePublicListingRecord(
     || text(record.originalDescription) || text(record.shortDescription)
     || text(record.itemDescription) || text(record.item_description);
   const imageRaw = record.image || record.imageUrl || record.image_url || record.cover_image
+    || record.cover_photo || record.coverPhoto
     || record.thumbnail || record.thumbnailUrl || record.thumbnail_url || record.imagePath
     || record.thumbnails || record.pictures || record.images || record.photos;
   const image = genericImage(imageRaw, pageUrl);

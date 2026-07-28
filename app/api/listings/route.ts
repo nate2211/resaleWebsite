@@ -1,7 +1,7 @@
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
-const WORKER_REVISION = "official-page-source-marketplaces-v10";
+const WORKER_REVISION = "grailed-depop-results-v11";
 const MAX_BODY_BYTES = 5_500_000;
 const UPSTREAM_TIMEOUT_MS = 15_000;
 const MAX_REDIRECTS = 2;

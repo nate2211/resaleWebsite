@@ -11,6 +11,13 @@ import {
   priceFromPublicText,
 } from "./public-listing-record";
 import { inferApparelType } from "./apparel";
+import {
+  GRAILED_PUBLIC_CONFIG_FALLBACK,
+  grailedHitToRecord,
+  parseDepopReaderMarkdown,
+  parseGrailedPublicConfig,
+  type GrailedPublicConfig,
+} from "./marketplace-source-parsers";
 
 export type FrontendMarketplaceResult = {
   marketplace: Marketplace;
@@ -43,7 +50,7 @@ type TextResponse = {
   url: string;
   contentType: string;
   text: string;
-  transport: "frontend-api" | "direct" | "extension" | "reader";
+  transport: "frontend-api" | "grailed-algolia" | "direct" | "extension" | "reader";
 };
 
 type BridgeResponse = {
@@ -318,6 +325,42 @@ function ensureBridgeResponseListener() {
   });
 }
 
+async function frontendGrailedAlgoliaFetch(
+  config: GrailedPublicConfig,
+  query: string,
+  page: number,
+  mode: "active" | "sold",
+  signal?: AbortSignal,
+): Promise<TextResponse> {
+  const merged = mergeAbortSignals(signal, DIRECT_TIMEOUT_MS + 4_000);
+  try {
+    const index = mode === "sold" ? config.soldIndex : config.activeIndex;
+    const response = await fetch("/api/grailed-search", {
+      method: "POST",
+      credentials: "same-origin",
+      cache: "no-store",
+      signal: merged.signal,
+      headers: { "content-type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({
+        query, page, mode, index, appId: config.appId, apiKey: config.apiKey,
+      }),
+    });
+    const text = (await response.text()).slice(0, MAX_RESPONSE_CHARS);
+    if (!response.ok) throw new Error(`Grailed public index relay HTTP ${response.status}`);
+    const upstreamStatus = Number(response.headers.get("x-rml-upstream-status") || "200") || 0;
+    return {
+      ok: upstreamStatus >= 200 && upstreamStatus < 300,
+      status: upstreamStatus,
+      url: `https://www.grailed.com/${mode === "sold" ? "sold" : "shop"}?query=${encodeURIComponent(query)}&page=${page + 1}`,
+      contentType: response.headers.get("content-type") || "application/json",
+      text,
+      transport: "grailed-algolia",
+    };
+  } finally {
+    merged.cleanup();
+  }
+}
+
 async function extensionFetchText(url: string, signal?: AbortSignal): Promise<TextResponse> {
   const injected = (window as Window & {
     __RML_EXTENSION_FETCH__?: (input: { url: string }) => Promise<BridgeResponse>;
@@ -480,9 +523,27 @@ function marketplaceRecordWithUrl(
   marketplace: Marketplace,
 ) {
   const enriched = { ...record };
+  if (marketplace === "Grailed") {
+    const prettyPath = recordText(enriched, ["pretty_path", "prettyPath"]);
+    if (!recordText(enriched, ["url", "web_url", "path"]) && prettyPath) enriched.url = prettyPath;
+    const cover = enriched.cover_photo && typeof enriched.cover_photo === "object"
+      ? enriched.cover_photo as Record<string, unknown>
+      : enriched.coverPhoto && typeof enriched.coverPhoto === "object"
+        ? enriched.coverPhoto as Record<string, unknown> : undefined;
+    if (!recordText(enriched, ["image", "image_url", "imageUrl"]) && cover) {
+      enriched.image = recordText(cover, ["url", "original_url", "originalUrl"]);
+    }
+    if (!recordText(enriched, ["brand"]) && Array.isArray(enriched.designers)) {
+      const designers = enriched.designers.map((value) => value && typeof value === "object"
+        ? recordText(value as Record<string, unknown>, ["name", "title"]) : String(value || "").trim())
+        .filter(Boolean).join(" × ");
+      if (designers) enriched.brand = designers;
+    }
+  }
   const existing = recordText(enriched, [
     "url", "web_url", "path", "productUrl", "product_url", "itemUrl", "item_url",
     "detailUrl", "detail_url", "shareUrl", "share_url", "href", "link", "targetUrl",
+    "pretty_path", "prettyPath",
   ]);
   if (existing) return enriched;
 
@@ -494,7 +555,10 @@ function marketplaceRecordWithUrl(
   const storeName = recordText(enriched, ["storeName", "store_name", "store", "source", "marketplace"]);
   if (!id) return enriched;
 
-  if (marketplace === "Rakuten" && (storeId === "0" || /rakuten/i.test(storeName))) {
+  if (marketplace === "Grailed") {
+    const slug = recordText(enriched, ["slug"]);
+    enriched.url = `/listings/${id}${slug ? `-${slug.replace(new RegExp(`^${id}-?`), "")}` : ""}`;
+  } else if (marketplace === "Rakuten" && (storeId === "0" || /rakuten/i.test(storeName))) {
     enriched.url = `https://zenmarket.jp/en/rakutenproduct.aspx?itemCode=${encodeURIComponent(id)}`;
   } else if (marketplace === "JDirectItems Auction" && (storeId === "28" || /auction|yahoo|jdirect/i.test(storeName))) {
     enriched.url = `https://zenmarket.jp/en/auction.aspx?itemCode=${encodeURIComponent(id)}`;
@@ -861,8 +925,28 @@ function parseHtml(text: string, marketplace: Marketplace, base: string) {
   return output;
 }
 
+function depopMarkdownListings(text: string, base: string) {
+  return parseDepopReaderMarkdown(text)
+    .map((record) => partialFromRecord(record as unknown as Record<string, unknown>, "Depop", base))
+    .filter(Boolean) as Partial<Listing>[];
+}
+
+function grailedAlgoliaListings(text: string, mode: "active" | "sold", base: string) {
+  try {
+    const payload = JSON.parse(text) as { hits?: Record<string, unknown>[] };
+    return (payload.hits || [])
+      .map((hit) => grailedHitToRecord(hit, mode))
+      .filter(Boolean)
+      .map((record) => partialFromRecord(record as Record<string, unknown>, "Grailed", base))
+      .filter(Boolean) as Partial<Listing>[];
+  } catch {
+    return [] as Partial<Listing>[];
+  }
+}
+
 function parseMarkdown(text: string, marketplace: Marketplace, base: string) {
   const output: Partial<Listing>[] = [];
+  if (marketplace === "Depop") output.push(...depopMarkdownListings(text, base));
   const linkPattern = /\[([^\]]{3,300})\]\((https?:\/\/[^)\s]+)\)/g;
   const images = [...text.matchAll(/!\[[^\]]*\]\((https?:\/\/[^)\s]+)\)/g)]
     .map((match) => ({ index: match.index || 0, url: marketplaceImage(match[1], marketplace, base) }))
@@ -1019,16 +1103,45 @@ export async function searchMarketplaceFrontend(input: {
   const urls = frontendMarketplaceUrls(marketplace, query, page, mode);
   const requestLimit = ["Depop", "Mercari Japan", "JDirectItems Auction", "Rakuten Rakuma"].includes(marketplace) ? 3 : 2;
   const attempts = await Promise.allSettled(urls.slice(0, requestLimit).map(async (url) => {
+    const responses: TextResponse[] = [];
     const response = await fetchReadableText(url, signal);
-    return { response, listings: parseResponse(response, marketplace) };
+    responses.push(response);
+    let listings = parseResponse(response, marketplace);
+
+    // A successful Depop HTML relay can still be only the JavaScript shell.
+    // In that case read the same official URL through the public readable-page
+    // representation, whose numbered cards include product links, prices, sizes
+    // and first-party media-photos.depop.com images.
+    if (marketplace === "Depop" && !listings.length && response.transport !== "reader") {
+      try {
+        const reader = await readerFetchText(url, signal);
+        responses.push(reader);
+        listings = parseResponse(reader, marketplace);
+      } catch { /* preserve the official page response */ }
+    }
+    return { response, responses, listings };
   }));
 
   const values = attempts.flatMap((attempt) => attempt.status === "fulfilled" ? [attempt.value] : []);
+
+  if (marketplace === "Grailed") {
+    const config = values.map((entry) => parseGrailedPublicConfig(entry.response.text)).find(Boolean)
+      || GRAILED_PUBLIC_CONFIG_FALLBACK;
+    try {
+      const algoliaResponse = await frontendGrailedAlgoliaFetch(config, query, page, mode, signal);
+      const listings = algoliaResponse.ok
+        ? grailedAlgoliaListings(algoliaResponse.text, mode, algoliaResponse.url) : [];
+      values.push({ response: algoliaResponse, responses: [algoliaResponse], listings });
+    } catch {
+      // Grailed's normal page source remains available as a fallback.
+    }
+  }
+
   const searchListings = dedupeListings(values.flatMap((entry) => entry.listings));
   const hydrated = await hydrateListingPages(searchListings, marketplace, signal);
   const listings = dedupeListings(hydrated.listings);
   const transport = [...new Set([
-    ...values.map((entry) => entry.response.transport),
+    ...values.flatMap((entry) => entry.responses.map((response) => response.transport)),
     ...hydrated.transports,
   ])];
   const readerFallbackUsed = transport.includes("reader");

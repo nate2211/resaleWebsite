@@ -16,7 +16,7 @@ test("targets the existing workers.dev deployment without custom routes", async 
 
 test("production checker verifies the bounded marketplace results API", async () => {
   const checker = await source("scripts/check-production.mjs");
-  assert.match(checker, /official-page-source-marketplaces-v10/);
+  assert.match(checker, /grailed-depop-results-v11/);
   assert.match(checker, /one-official-page-per-relay-request/);
   assert.match(checker, /x-rml-upstream-status/);
   assert.match(checker, /example\.com/);

@@ -1,4 +1,4 @@
-# ResaleMasterLab — Official Marketplace Page Sources v10
+# ResaleMasterLab — Grailed + Depop Results v11
 
 This version restores the earlier marketplace-adapter behavior: each search begins with the marketplace's normal public search URL and query parameters, then the browser parses that page source for real listing records.
 
@@ -27,7 +27,7 @@ When a search card is missing important fields, the frontend hydrates at most ei
 ## Official query routes
 
 - Depop: `/search/?q=...&page=...`, then brand and theme pages.
-- Grailed: `/shop?query=...&page=...` or `/sold?...`.
+- Grailed: `/shop?query=...&page=...` or `/sold?...`; the page's public Algolia configuration then selects `Listing_production` or `Listing_sold_production`.
 - Poshmark: `/search?query=...&type=listings&src=ac&page=...`.
 - Mercari Japan: `/search?keyword=...&status=on_sale|sold_out&page=...`.
 - JDirectItems through ZenMarket: `search.aspx?...&searchMode=custom&stores=28`.
@@ -35,11 +35,13 @@ When a search card is missing important fields, the frontend hydrates at most ei
 - Rakuten Rakuma through ZenMarket: `search.aspx?...&searchMode=custom&stores=25`.
 - Bunjang: `/search?q=...&page=...`.
 
-Depop's undocumented `webapi.depop.com` search endpoints are not used.
+Depop's undocumented `webapi.depop.com` search endpoints are not used. If the official HTML is only a JavaScript shell, the frontend reads the same official URL through the readable-page representation and parses its numbered, image-wrapped product cards.
+
+Grailed's shell exposes a public search application ID, search key, and listing indexes. The frontend extracts those values and sends one bounded JSON search through `/api/grailed-search`; listing title, designer, price, size, image, and canonical URL are parsed in the browser.
 
 ## Worker safety
 
-Revision: `official-page-source-marketplaces-v10`
+Revision: `grailed-depop-results-v11`
 
 - No Browser Run binding.
 - One official URL per relay request.
@@ -83,9 +85,11 @@ Expected `/api/health` fields:
 
 ```json
 {
-  "revision": "official-page-source-marketplaces-v10",
+  "revision": "grailed-depop-results-v11",
   "marketplaceRequests": "official-page-source-relay",
+  "grailedSearch": "public-index-relay",
   "browserBindingAvailable": false,
-  "cloudflareMarketplaceFetches": "one-official-page-per-relay-request"
+  "cloudflareMarketplaceFetches": "one-official-page-per-relay-request",
+  "grailedPublicIndexFetches": "one-bounded-json-request-per-search"
 }
 ```
