@@ -1,9 +1,11 @@
 {
   "manifest_version": 3,
   "name": "ResaleMasterLab Browser Bridge",
-  "version": "1.0.0",
-  "description": "Lets ResaleMasterLab read public marketplace pages from your browser without using Cloudflare marketplace functions.",
-  "permissions": ["storage"],
+  "version": "1.1.0",
+  "description": "CORS-safe marketplace bridge for ResaleMasterLab. Known blocked sites are fetched only from the extension process.",
+  "permissions": [
+    "storage"
+  ],
   "host_permissions": [
     "https://www.depop.com/*",
     "https://webapi.depop.com/*",
@@ -32,7 +34,9 @@
         "http://localhost/*",
         "http://127.0.0.1/*"
       ],
-      "js": ["content.js"],
+      "js": [
+        "content.js"
+      ],
       "run_at": "document_start"
     }
   ],

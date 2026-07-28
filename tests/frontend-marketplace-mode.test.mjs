@@ -22,6 +22,10 @@ test("moves marketplace requests out of Cloudflare routes", async () => {
   assert.match(page, /searchMarketplaceFrontend/);
   assert.match(page, /searchAiWebFrontend/);
   assert.match(client, /mode:\s*"cors"/);
+  assert.match(client, /CORS_BLOCKED_MARKETPLACE_HOSTS/);
+  assert.match(client, /directBrowserFetchAllowed/);
+  assert.match(client, /pendingBridgeRequests/);
+  assert.match(client, /bridgeResponseListenerInstalled/);
   assert.match(client, /RML_FETCH_REQUEST/);
   assert.match(client, /https:\/\/r\.jina\.ai\//);
   assert.match(client, /https:\/\/s\.jina\.ai\//);
@@ -31,7 +35,7 @@ test("moves marketplace requests out of Cloudflare routes", async () => {
   assert.match(imageRoute, /status:\s*410/);
   assert.doesNotMatch(wrangler, /"browser"\s*:/);
   assert.doesNotMatch(wrangler, /"binding"\s*:\s*"BROWSER"/);
-  assert.match(health, /frontend-marketplaces-v7/);
+  assert.match(health, /frontend-marketplaces-cors-safe-v8/);
   assert.match(health, /cloudflareMarketplaceFetches:\s*false/);
 });
 
@@ -68,6 +72,8 @@ test("includes an explicit browser extension bridge", async () => {
   assert.ok(manifest.host_permissions.includes("https://www.ebay.com/*"));
   assert.match(content, /RML_FETCH_REQUEST/);
   assert.match(content, /RML_FETCH_RESPONSE/);
+  assert.match(content, /__RML_BROWSER_BRIDGE_CONTENT_INSTALLED__/);
+  assert.match(background, /__RML_BROWSER_BRIDGE_BACKGROUND_INSTALLED__/);
   assert.match(background, /chrome\.runtime\.onMessage/);
   assert.match(background, /credentials:\s*"omit"/);
 });

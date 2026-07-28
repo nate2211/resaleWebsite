@@ -6,7 +6,7 @@ ResaleMasterLab is a Vinext/React resale research application. This version move
 
 Cloudflare Error 1102 means a Worker exceeded its CPU-time or memory allowance. The previous production route performed large HTML/JSON parsing and multiple Browser Run operations inside `/api/listings`; that work has been removed.
 
-In revision `frontend-marketplaces-v7`:
+In revision `frontend-marketplaces-cors-safe-v8`:
 
 - `/api/listings` is intentionally disabled and returns HTTP 410.
 - `/api/web-listings` is intentionally disabled and returns HTTP 410.
@@ -17,11 +17,13 @@ In revision `frontend-marketplaces-v7`:
 
 ## Browser request order
 
-For each marketplace URL, the client tries:
+For a marketplace known to block page-origin CORS, the client tries:
 
-1. A normal browser `fetch()` when the marketplace allows CORS.
-2. The optional ResaleMasterLab Browser Bridge extension.
-3. Jina Reader (`r.jina.ai`) as a public reader fallback.
+1. The optional ResaleMasterLab Browser Bridge extension.
+2. Jina Reader (`r.jina.ai`) as a public reader fallback.
+3. A live-search link when neither readable transport succeeds.
+
+For hosts that are not on the known CORS-blocked list, a normal browser `fetch()` is attempted first. The app deliberately does **not** call `fetch()` against Depop, Grailed, Poshmark, ZenMarket, Rakuten, Mercari, eBay, or Facebook from the page origin, preventing the repeated CORS errors shown in DevTools.
 
 The AI Search card additionally uses `s.jina.ai` when available to discover eBay, Mercari US, Facebook Marketplace, and other unsupported secondhand stores.
 
@@ -50,7 +52,7 @@ The extension is in `browser-extension/`.
 4. Select the `browser-extension` folder.
 5. Reload ResaleMasterLab.
 
-The extension has explicit host permissions for the supported marketplace domains. It performs GET requests in the browser extension process and sends public response text back to the page for parsing.
+The extension has explicit host permissions for the supported marketplace domains. It performs GET requests in the browser extension process and sends public response text back to the page for parsing. Version 1.1 uses a single shared page-response listener and singleton content/background listeners, so concurrent marketplace searches do not accumulate event listeners.
 
 ## Optional Jina key
 
@@ -103,7 +105,7 @@ Expected fields:
 
 ```json
 {
-  "revision": "frontend-marketplaces-v7",
+  "revision": "frontend-marketplaces-cors-safe-v8",
   "marketplaceRequests": "browser",
   "browserBindingAvailable": false,
   "cloudflareMarketplaceFetches": false
@@ -119,3 +121,8 @@ Depop image URLs are loaded directly from their published CDN with `referrerPoli
 ## Important limitation
 
 A deployed frontend cannot defeat marketplace CORS or login requirements. When direct fetch and public-reader access are blocked, ResaleMasterLab retains the original marketplace search URL and asks the user to open it directly or enable the included browser bridge. It does not bypass authentication, CAPTCHA, or anti-bot protections.
+
+
+## Browser-extension console warnings
+
+Messages mentioning `ObjectMultiplex`, `app-init-liveness`, `background-liveness`, or a bundled `contentscript.js` are not emitted by ResaleMasterLab or its included bridge. Those identifiers are commonly injected by another browser extension. The ResaleMasterLab bridge files are named `content.js` and `background.js`, and v1.1 installs each listener only once. Use an extension-free profile to identify the unrelated extension if those messages remain.

@@ -60,6 +60,34 @@ const DIRECT_TIMEOUT_MS = 12_000;
 const READER_TIMEOUT_MS = 20_000;
 const JINA_KEY_STORAGE = "rml:jina-reader-key";
 
+const CORS_BLOCKED_MARKETPLACE_HOSTS = [
+  "depop.com",
+  "webapi.depop.com",
+  "grailed.com",
+  "poshmark.com",
+  "jp.mercari.com",
+  "zenmarket.jp",
+  "rakuten.co.jp",
+  "fril.jp",
+  "globalbunjang.com",
+  "ebay.com",
+  "mercari.com",
+  "facebook.com",
+] as const;
+
+function hostnameMatches(hostname: string, domain: string) {
+  return hostname === domain || hostname.endsWith(`.${domain}`);
+}
+
+function directBrowserFetchAllowed(url: string) {
+  try {
+    const hostname = new URL(url).hostname.toLowerCase();
+    return !CORS_BLOCKED_MARKETPLACE_HOSTS.some((domain) => hostnameMatches(hostname, domain));
+  } catch {
+    return false;
+  }
+}
+
 function stringValue(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -204,6 +232,52 @@ function extensionBridgeAvailable() {
   );
 }
 
+type PendingBridgeRequest = {
+  resolve: (value: TextResponse) => void;
+  reject: (reason: Error | DOMException) => void;
+  url: string;
+  timer: number;
+  signal?: AbortSignal;
+  onAbort?: () => void;
+};
+
+const pendingBridgeRequests = new Map<string, PendingBridgeRequest>();
+let bridgeResponseListenerInstalled = false;
+
+function settleBridgeRequest(id: string, callback: (pending: PendingBridgeRequest) => void) {
+  const pending = pendingBridgeRequests.get(id);
+  if (!pending) return;
+  pendingBridgeRequests.delete(id);
+  window.clearTimeout(pending.timer);
+  if (pending.onAbort) pending.signal?.removeEventListener("abort", pending.onAbort);
+  callback(pending);
+}
+
+function ensureBridgeResponseListener() {
+  if (bridgeResponseListenerInstalled || typeof window === "undefined") return;
+  bridgeResponseListenerInstalled = true;
+  window.addEventListener("message", (event: MessageEvent) => {
+    if (event.source !== window) return;
+    const data = event.data as { type?: string; id?: string; source?: string; response?: BridgeResponse };
+    if (data?.type !== "RML_FETCH_RESPONSE" || typeof data.id !== "string") return;
+    const value = data.response;
+    settleBridgeRequest(data.id, (pending) => {
+      if (!value || value.error) {
+        pending.reject(new Error(value?.error || "Browser bridge request failed."));
+        return;
+      }
+      pending.resolve({
+        ok: Boolean(value.ok),
+        status: Number(value.status) || 0,
+        url: value.url || pending.url,
+        contentType: value.contentType || "",
+        text: (value.body || "").slice(0, MAX_RESPONSE_CHARS),
+        transport: "extension",
+      });
+    });
+  });
+}
+
 async function extensionFetchText(url: string, signal?: AbortSignal): Promise<TextResponse> {
   const injected = (window as Window & {
     __RML_EXTENSION_FETCH__?: (input: { url: string }) => Promise<BridgeResponse>;
@@ -221,44 +295,24 @@ async function extensionFetchText(url: string, signal?: AbortSignal): Promise<Te
     };
   }
 
+  if (!extensionBridgeAvailable()) {
+    throw new Error("Browser bridge is not installed or not ready.");
+  }
+
+  ensureBridgeResponseListener();
   const id = `rml-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   return await new Promise<TextResponse>((resolve, reject) => {
-    let settled = false;
-    const finish = (callback: () => void) => {
-      if (settled) return;
-      settled = true;
-      window.clearTimeout(timer);
-      window.removeEventListener("message", onMessage);
-      signal?.removeEventListener("abort", onAbort);
-      callback();
-    };
-    const onAbort = () => finish(() => reject(new DOMException("Request cancelled.", "AbortError")));
-    const onMessage = (event: MessageEvent) => {
-      if (event.source !== window) return;
-      const data = event.data as { type?: string; id?: string; response?: BridgeResponse };
-      if (data?.type !== "RML_FETCH_RESPONSE" || data.id !== id) return;
-      const value = data.response;
-      finish(() => {
-        if (!value || value.error) {
-          reject(new Error(value?.error || "Browser bridge request failed."));
-          return;
-        }
-        resolve({
-          ok: Boolean(value.ok),
-          status: Number(value.status) || 0,
-          url: value.url || url,
-          contentType: value.contentType || "",
-          text: (value.body || "").slice(0, MAX_RESPONSE_CHARS),
-          transport: "extension",
-        });
-      });
-    };
-    const timer = window.setTimeout(
-      () => finish(() => reject(new Error("Browser bridge is not installed or did not respond."))),
-      BRIDGE_TIMEOUT_MS,
-    );
-    window.addEventListener("message", onMessage);
-    signal?.addEventListener("abort", onAbort, { once: true });
+    const timer = window.setTimeout(() => {
+      settleBridgeRequest(id, (pending) => pending.reject(new Error("Browser bridge request timed out.")));
+    }, BRIDGE_TIMEOUT_MS);
+    const pending: PendingBridgeRequest = { resolve, reject, url, timer, signal };
+    if (signal) {
+      pending.onAbort = () => {
+        settleBridgeRequest(id, (request) => request.reject(new DOMException("Request cancelled.", "AbortError")));
+      };
+      signal.addEventListener("abort", pending.onAbort, { once: true });
+    }
+    pendingBridgeRequests.set(id, pending);
     window.postMessage({ type: "RML_FETCH_REQUEST", id, request: { url } }, "*");
   });
 }
@@ -305,6 +359,35 @@ async function readerFetchText(url: string, signal?: AbortSignal): Promise<TextR
 
 async function fetchReadableText(url: string, signal?: AbortSignal): Promise<TextResponse> {
   const failures: string[] = [];
+  const directAllowed = directBrowserFetchAllowed(url);
+  const bridgeReady = extensionBridgeAvailable();
+
+  // Known marketplaces block page-origin CORS. Do not generate a guaranteed
+  // browser-console failure; use the extension process or public reader first.
+  if (!directAllowed) {
+    if (bridgeReady) {
+      try {
+        const bridged = await extensionFetchText(url, signal);
+        if (bridged.ok && bridged.text.trim()) return bridged;
+        failures.push(`extension HTTP ${bridged.status}`);
+      } catch (error) {
+        failures.push(error instanceof Error ? error.message : "extension bridge unavailable");
+      }
+    } else {
+      failures.push("browser bridge not installed");
+    }
+
+    try {
+      const reader = await readerFetchText(url, signal);
+      if (reader.ok && reader.text.trim()) return reader;
+      failures.push(`reader HTTP ${reader.status}`);
+    } catch (error) {
+      failures.push(error instanceof Error ? error.message : "reader unavailable");
+    }
+
+    throw new Error(failures.filter(Boolean).join("; ") || "Marketplace requires the browser bridge.");
+  }
+
   try {
     const direct = await directFetchText(url, signal);
     if (direct.ok && direct.text.trim()) return direct;
@@ -313,12 +396,14 @@ async function fetchReadableText(url: string, signal?: AbortSignal): Promise<Tex
     failures.push(error instanceof Error ? error.message : "direct fetch blocked");
   }
 
-  try {
-    const bridged = await extensionFetchText(url, signal);
-    if (bridged.ok && bridged.text.trim()) return bridged;
-    failures.push(`extension HTTP ${bridged.status}`);
-  } catch (error) {
-    failures.push(error instanceof Error ? error.message : "extension bridge unavailable");
+  if (bridgeReady) {
+    try {
+      const bridged = await extensionFetchText(url, signal);
+      if (bridged.ok && bridged.text.trim()) return bridged;
+      failures.push(`extension HTTP ${bridged.status}`);
+    } catch (error) {
+      failures.push(error instanceof Error ? error.message : "extension bridge unavailable");
+    }
   }
 
   try {

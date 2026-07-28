@@ -8,7 +8,7 @@ function response() {
     listings: [],
     hasMore: false,
     frontendOnly: true,
-    workerRevision: "frontend-marketplaces-v7",
+    workerRevision: "frontend-marketplaces-cors-safe-v8",
   }, {
     status: 410,
     headers: { "cache-control": "no-store" },

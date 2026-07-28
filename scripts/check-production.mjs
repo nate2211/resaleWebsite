@@ -22,7 +22,7 @@ if (!homepage.response.ok || !/ResaleMasterLab/i.test(homepage.text)) {
 const healthResult = await read("/api/health");
 if (!healthResult.response.ok) throw new Error(`/api/health returned HTTP ${healthResult.response.status}.`);
 const health = JSON.parse(healthResult.text);
-if (health.revision !== "frontend-marketplaces-v7") {
+if (health.revision !== "frontend-marketplaces-cors-safe-v8") {
   throw new Error(`The domain is serving an older revision: ${health.revision || "unknown"}.`);
 }
 if (health.cloudflareMarketplaceFetches !== false || health.marketplaceRequests !== "browser") {

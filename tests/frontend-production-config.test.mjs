@@ -16,7 +16,7 @@ test("targets the existing workers.dev deployment without custom routes", async 
 
 test("production checker verifies browser mode instead of scraping Depop", async () => {
   const checker = await source("scripts/check-production.mjs");
-  assert.match(checker, /frontend-marketplaces-v7/);
+  assert.match(checker, /frontend-marketplaces-cors-safe-v8/);
   assert.match(checker, /cloudflareMarketplaceFetches/);
   assert.match(checker, /status !== 410/);
   assert.doesNotMatch(checker, /media-photos\.depop/);
