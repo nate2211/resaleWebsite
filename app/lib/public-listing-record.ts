@@ -188,13 +188,16 @@ export function normalizePublicListingRecord(
       : marketplace === "Depop" && text(record.slug)
         ? `https://www.depop.com/products/${text(record.slug).replace(/^\/+|\/+$/g, "")}/`
         : "";
-  const rawUrl = absolute(
-    record.url || record.web_url || record.path || record.productUrl || record.product_url
-      || record.itemUrl || record.item_url || record.detailUrl || record.detail_url
-      || record.shareUrl || record.share_url || generatedUrl || pageUrl,
-    pageUrl,
-  );
-  if (!chosen.amount || !title || !rawUrl) return null;
+  const explicitUrl = record.url || record.web_url || record.path || record.productUrl || record.product_url
+    || record.itemUrl || record.item_url || record.detailUrl || record.detail_url
+    || record.shareUrl || record.share_url || generatedUrl;
+  const rawUrl = absolute(explicitUrl, pageUrl);
+  // Search-page state frequently contains useful product records before a price
+  // is hydrated. Keep those real records so the frontend can merge card HTML
+  // and, when needed, fetch the canonical listing page for the missing fields.
+  // Never turn an arbitrary state object into a listing by falling back to the
+  // search-page URL itself.
+  if (!title || !rawUrl) return null;
 
   const brandRaw = record.brand;
   const brand = text(brandRaw) || nestedText(brandRaw, "name", "localizedName", "label");

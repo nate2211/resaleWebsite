@@ -17,6 +17,6 @@
     "enabled": true
   },
   "vars": {
-    "RML_MARKETPLACE_TRANSPORT": "frontend-api-relay"
+    "RML_MARKETPLACE_TRANSPORT": "official-page-source-relay"
   }
 }

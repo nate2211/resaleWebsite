@@ -1,14 +1,13 @@
 {
   "manifest_version": 3,
   "name": "ResaleMasterLab Browser Bridge",
-  "version": "1.1.0",
-  "description": "CORS-safe marketplace bridge for ResaleMasterLab. Known blocked sites are fetched only from the extension process.",
+  "version": "1.2.0",
+  "description": "Official marketplace page-source bridge for ResaleMasterLab. Fetches normal search and product pages when a site blocks the same-origin relay.",
   "permissions": [
     "storage"
   ],
   "host_permissions": [
     "https://www.depop.com/*",
-    "https://webapi.depop.com/*",
     "https://www.grailed.com/*",
     "https://poshmark.com/*",
     "https://jp.mercari.com/*",

@@ -1,37 +1,25 @@
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
-const WORKER_REVISION = "frontend-marketplace-results-api-v9";
-const MAX_BODY_BYTES = 2_000_000;
-const UPSTREAM_TIMEOUT_MS = 10_000;
+const WORKER_REVISION = "official-page-source-marketplaces-v10";
+const MAX_BODY_BYTES = 5_500_000;
+const UPSTREAM_TIMEOUT_MS = 15_000;
 const MAX_REDIRECTS = 2;
 
 const ALLOWED_MARKETPLACE_HOSTS = [
   "depop.com",
-  "webapi.depop.com",
   "grailed.com",
   "poshmark.com",
   "jp.mercari.com",
   "zenmarket.jp",
   "rakuten.co.jp",
+  "auctions.yahoo.co.jp",
   "fril.jp",
   "globalbunjang.com",
   "ebay.com",
   "mercari.com",
   "facebook.com",
 ] as const;
-
-type RelayPayload = {
-  ok: boolean;
-  status: number;
-  url: string;
-  contentType: string;
-  body: string;
-  truncated: boolean;
-  transport: "frontend-api";
-  workerRevision: string;
-  error?: string;
-};
 
 function hostnameMatches(hostname: string, domain: string) {
   return hostname === domain || hostname.endsWith(`.${domain}`);
@@ -44,28 +32,25 @@ function parseAllowedUrl(value: string) {
   } catch {
     throw new Error("A valid marketplace URL is required.");
   }
-  if (parsed.protocol !== "https:") {
-    throw new Error("Only HTTPS marketplace URLs are allowed.");
-  }
+  if (parsed.protocol !== "https:") throw new Error("Only HTTPS marketplace URLs are allowed.");
   if (parsed.username || parsed.password || parsed.port) {
     throw new Error("Marketplace URLs cannot contain credentials or custom ports.");
   }
   const hostname = parsed.hostname.toLowerCase();
   if (!ALLOWED_MARKETPLACE_HOSTS.some((domain) => hostnameMatches(hostname, domain))) {
-    throw new Error("That marketplace host is not allowed by the results relay.");
+    throw new Error("That marketplace host is not allowed by the page-source relay.");
   }
   return parsed;
 }
 
-function json(value: RelayPayload | { error: string; workerRevision: string }, status = 200) {
-  return Response.json(value, {
+function errorJson(message: string, status: number) {
+  return Response.json({ error: message, workerRevision: WORKER_REVISION }, {
     status,
     headers: {
       "cache-control": "no-store, max-age=0",
-      "cdn-cache-control": "no-store",
-      "cloudflare-cdn-cache-control": "no-store",
       "x-rml-worker-revision": WORKER_REVISION,
-      "x-rml-marketplace-mode": "thin-results-relay",
+      "x-rml-marketplace-mode": "official-page-source-relay",
+      "x-rml-relay-error": "1",
     },
   });
 }
@@ -85,7 +70,7 @@ async function readLimitedText(response: Response) {
       const remaining = MAX_BODY_BYTES - size;
       if (remaining <= 0) {
         truncated = true;
-        await reader.cancel("Marketplace result body limit reached.");
+        await reader.cancel("Marketplace page-source limit reached.");
         break;
       }
       const chunk = value.byteLength > remaining ? value.subarray(0, remaining) : value;
@@ -93,7 +78,7 @@ async function readLimitedText(response: Response) {
       body += decoder.decode(chunk, { stream: true });
       if (value.byteLength > remaining) {
         truncated = true;
-        await reader.cancel("Marketplace result body limit reached.");
+        await reader.cancel("Marketplace page-source limit reached.");
         break;
       }
     }
@@ -104,7 +89,7 @@ async function readLimitedText(response: Response) {
   }
 }
 
-async function fetchMarketplaceResult(initialUrl: URL, requestSignal: AbortSignal) {
+async function fetchMarketplacePage(initialUrl: URL, requestSignal: AbortSignal) {
   let current = initialUrl;
   for (let redirectCount = 0; redirectCount <= MAX_REDIRECTS; redirectCount += 1) {
     const controller = new AbortController();
@@ -118,19 +103,16 @@ async function fetchMarketplaceResult(initialUrl: URL, requestSignal: AbortSigna
         cache: "no-store",
         signal: controller.signal,
         headers: {
-          accept: "application/json,text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.7",
+          accept: "text/html,application/xhtml+xml,application/json,text/plain;q=0.9,*/*;q=0.6",
           "accept-language": "en-US,en;q=0.9",
           "cache-control": "no-cache",
           pragma: "no-cache",
           "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/150 Safari/537.36",
         },
       });
-
       if ([301, 302, 303, 307, 308].includes(response.status)) {
         const location = response.headers.get("location");
-        if (!location || redirectCount >= MAX_REDIRECTS) {
-          return { response, url: current };
-        }
+        if (!location || redirectCount >= MAX_REDIRECTS) return { response, url: current };
         current = parseAllowedUrl(new URL(location, current).toString());
         continue;
       }
@@ -144,54 +126,46 @@ async function fetchMarketplaceResult(initialUrl: URL, requestSignal: AbortSigna
 }
 
 async function relay(request: Request) {
-  let source = "";
+  const requestUrl = new URL(request.url);
+  let source = requestUrl.searchParams.get("source") || "";
   if (request.method === "POST") {
     try {
       const payload = await request.json() as { source?: unknown; url?: unknown };
       source = typeof payload.source === "string" ? payload.source : typeof payload.url === "string" ? payload.url : "";
     } catch {
-      return json({ error: "The request body must be valid JSON.", workerRevision: WORKER_REVISION }, 400);
+      return errorJson("The request body must be valid JSON.", 400);
     }
-  } else {
-    source = new URL(request.url).searchParams.get("source") || "";
   }
 
   let sourceUrl: URL;
   try {
     sourceUrl = parseAllowedUrl(source);
   } catch (error) {
-    return json({
-      error: error instanceof Error ? error.message : "Marketplace URL rejected.",
-      workerRevision: WORKER_REVISION,
-    }, 400);
+    return errorJson(error instanceof Error ? error.message : "Marketplace URL rejected.", 400);
   }
 
   try {
-    const { response, url } = await fetchMarketplaceResult(sourceUrl, request.signal);
+    const { response, url } = await fetchMarketplacePage(sourceUrl, request.signal);
     const { body, truncated } = await readLimitedText(response);
-    return json({
-      ok: response.ok,
-      status: response.status,
-      url: url.toString(),
-      contentType: response.headers.get("content-type") || "",
-      body,
-      truncated,
-      transport: "frontend-api",
-      workerRevision: WORKER_REVISION,
+    return new Response(body, {
+      // The browser must be able to parse challenge/error HTML too, so expose
+      // the upstream status in a header instead of turning it into a same-origin
+      // fetch rejection. The frontend decides whether the body contains cards.
+      status: 200,
+      headers: {
+        "content-type": response.headers.get("content-type") || "text/plain; charset=utf-8",
+        "cache-control": "no-store, max-age=0",
+        "cdn-cache-control": "no-store",
+        "x-rml-worker-revision": WORKER_REVISION,
+        "x-rml-marketplace-mode": "official-page-source-relay",
+        "x-rml-upstream-status": String(response.status),
+        "x-rml-final-url": url.toString(),
+        "x-rml-upstream-content-type": response.headers.get("content-type") || "",
+        "x-rml-truncated": truncated ? "1" : "0",
+      },
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Marketplace request failed.";
-    return json({
-      ok: false,
-      status: 0,
-      url: sourceUrl.toString(),
-      contentType: "",
-      body: "",
-      truncated: false,
-      transport: "frontend-api",
-      workerRevision: WORKER_REVISION,
-      error: message,
-    });
+    return errorJson(error instanceof Error ? error.message : "Marketplace request failed.", 502);
   }
 }
 

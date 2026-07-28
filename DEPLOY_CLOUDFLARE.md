@@ -1,21 +1,33 @@
-# Deploy the frontend marketplace-results API edition
+# Deploy official marketplace page-source v10
 
-Target:
+Production URL:
 
 ```text
 https://resalewebsite.unusualsuspectsclothing.workers.dev/
 ```
 
-## Cloudflare Git Build settings
+Cloudflare Git settings:
 
 ```text
 Build command: npm run build:windows
 Deploy command: npm run deploy
 Non-production deploy command: npm run preview:cloudflare
 Root directory: /
+Node version: 22
 ```
 
-## Command-line deployment
+`wrangler.jsonc` uses Worker name `resalewebsite`, `workers_dev: true`, no custom routes, and no Browser Run binding.
+
+The `/api/listings` endpoint is a one-URL page-source relay. It returns raw official marketplace HTML/JSON with these headers:
+
+- `x-rml-upstream-status`
+- `x-rml-final-url`
+- `x-rml-upstream-content-type`
+- `x-rml-truncated`
+
+All marketplace parsing and bounded product-page enrichment run in the frontend.
+
+Deploy and verify:
 
 ```powershell
 npm ci
@@ -24,15 +36,3 @@ npm run build:windows
 npm run deploy
 npm run check:production
 ```
-
-`wrangler.jsonc` uses:
-
-- Worker name `resalewebsite`;
-- `workers_dev: true`;
-- no custom-domain routes;
-- no Browser Run binding;
-- `RML_MARKETPLACE_TRANSPORT=frontend-api-relay`.
-
-`/api/listings` is a bounded raw-response relay. Each invocation makes at most one active marketplace request at a time, follows at most two validated redirects, stops after 10 seconds, and reads at most 2 MB. Marketplace parsing and comparisons run in the browser.
-
-`/api/web-listings` and `/api/image-proxy` remain disabled because AI discovery and image filtering are handled client-side.

@@ -22,21 +22,26 @@ if (!homepage.response.ok || !/ResaleMasterLab/i.test(homepage.text)) {
 const healthResult = await read("/api/health");
 if (!healthResult.response.ok) throw new Error(`/api/health returned HTTP ${healthResult.response.status}.`);
 const health = JSON.parse(healthResult.text);
-if (health.revision !== "frontend-marketplace-results-api-v9") {
+if (health.revision !== "official-page-source-marketplaces-v10") {
   throw new Error(`The domain is serving an older revision: ${health.revision || "unknown"}.`);
 }
-if (health.marketplaceRequests !== "frontend-api-relay" || health.cloudflareMarketplaceFetches !== "single-bounded-relay-only") {
-  throw new Error("The deployed version is not using the bounded frontend marketplace-results relay.");
+if (health.marketplaceRequests !== "official-page-source-relay"
+  || health.cloudflareMarketplaceFetches !== "one-official-page-per-relay-request") {
+  throw new Error("The deployed version is not using the official marketplace page-source relay.");
 }
 
-const relayPath = `/api/listings?source=${encodeURIComponent("https://www.depop.com/search/?q=supreme&page=1")}`;
-const relayResult = await read(relayPath);
+const source = "https://www.depop.com/search/?q=supreme&page=1";
+const relayResult = await read(`/api/listings?source=${encodeURIComponent(source)}`);
 if (!relayResult.response.ok) {
-  throw new Error(`The marketplace-results API returned HTTP ${relayResult.response.status}.`);
+  throw new Error(`The marketplace page-source relay returned HTTP ${relayResult.response.status}.`);
 }
-const relay = JSON.parse(relayResult.text);
-if (relay.transport !== "frontend-api" || typeof relay.status !== "number" || typeof relay.body !== "string") {
-  throw new Error("The marketplace-results API did not return the expected raw-response envelope.");
+const upstreamStatus = Number(relayResult.response.headers.get("x-rml-upstream-status") || "0");
+const finalUrl = relayResult.response.headers.get("x-rml-final-url") || "";
+if (!upstreamStatus || !/depop\.com/i.test(finalUrl) || relayResult.text.length < 100) {
+  throw new Error("The marketplace relay did not return a readable official Depop page source.");
+}
+if (!/official-page-source-relay/i.test(relayResult.response.headers.get("x-rml-marketplace-mode") || "")) {
+  throw new Error("The marketplace endpoint is not serving the v10 official page-source transport.");
 }
 
 const rejected = await read(`/api/listings?source=${encodeURIComponent("https://example.com/")}`);
@@ -49,8 +54,9 @@ console.log(JSON.stringify({
   revision: health.revision,
   homepage: homepage.response.status,
   marketplaceTransport: health.marketplaceRequests,
-  relayUpstreamStatus: relay.status,
-  relayCharacters: relay.body.length,
+  relayUpstreamStatus: upstreamStatus,
+  relayCharacters: relayResult.text.length,
+  relayFinalUrl: finalUrl,
   allowlistRejection: rejected.response.status,
 }, null, 2));
-console.log("Production shell and the bounded frontend marketplace-results API are healthy.");
+console.log("Production shell and official marketplace page-source relay are healthy.");

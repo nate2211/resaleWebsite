@@ -154,13 +154,13 @@ export const MARKETPLACE_INFO: Record<
   },
   "Mercari Japan": {
     color: "#ff3158", tint: "#fff0f4", home: "https://jp.mercari.com/en/",
-    search: (query) => `https://jp.mercari.com/en/search?keyword=${encodeURIComponent(query)}&status=on_sale`,
+    search: (query) => `https://jp.mercari.com/search?keyword=${encodeURIComponent(query)}&status=on_sale`,
     feeSummary: "Japan source; landed-cost estimator includes shipping, FX, and customs reserve",
     sourcingOnly: true, origin: "Japan",
   },
   "JDirectItems Auction": {
     color: "#d43b31", tint: "#fff1ef", home: "https://zenmarket.jp/en/",
-    search: (query) => `https://zenmarket.jp/en/yahoo.aspx?q=${encodeURIComponent(query)}&p=1`,
+    search: (query) => `https://zenmarket.jp/en/search.aspx?q=${encodeURIComponent(query)}&p=1&searchMode=custom&stores=28`,
     feeSummary: "ZenMarket source; proxy and international landed costs estimated",
     sourcingOnly: true, proxy: "ZenMarket", origin: "Japan",
   },
@@ -172,7 +172,7 @@ export const MARKETPLACE_INFO: Record<
   },
   "Rakuten Rakuma": {
     color: "#59b75c", tint: "#effaf0", home: "https://zenmarket.jp/en/",
-    search: (query) => `https://zenmarket.jp/en/rakuma.aspx?q=${encodeURIComponent(query)}&p=1`,
+    search: (query) => `https://zenmarket.jp/en/search.aspx?q=${encodeURIComponent(query)}&p=1&searchMode=custom&stores=25`,
     feeSummary: "Rakuma through ZenMarket; proxy and landed costs estimated",
     sourcingOnly: true, proxy: "ZenMarket", origin: "Japan",
   },

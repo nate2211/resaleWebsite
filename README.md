@@ -1,90 +1,75 @@
-# ResaleMasterLab — Frontend Marketplace Results API
+# ResaleMasterLab — Official Marketplace Page Sources v10
 
-ResaleMasterLab is a Vinext/React resale-research application. This revision restores the earlier **frontend API marketplace-results flow** without restoring the resource-heavy Cloudflare implementation that caused Worker Error 1102.
+This version restores the earlier marketplace-adapter behavior: each search begins with the marketplace's normal public search URL and query parameters, then the browser parses that page source for real listing records.
 
-## How marketplace loading works
+## Marketplace request flow
 
-For each marketplace URL, the frontend calls the same-origin endpoint:
+For every official search or product URL, the browser calls:
 
 ```text
-/api/listings?source=<encoded marketplace URL>
+/api/listings?source=<encoded official marketplace URL>
 ```
 
-That endpoint is deliberately a thin relay. It performs one bounded upstream `GET`, streams at most 2 MB of raw response text back to the browser, and stops after 10 seconds. It does **not**:
+The route makes exactly one bounded upstream request and returns the raw HTML, JSON, React state, or text body. It does not use Browser Run, crawl search engines, parse listings on the server, run AI, or fan out to other pages.
 
-- invoke Browser Run;
-- render JavaScript pages;
-- crawl search engines;
-- hydrate product pages;
-- run marketplace HTML/JSON parsers;
-- compare listings or run AI analysis.
+The frontend then parses:
 
-All JSON, JSON-LD, HTML, markdown, image filtering, deduplication, comparisons, fees, filters, and local-AI ranking remain in `app/lib/frontend-marketplaces.ts` and `app/page.tsx` in the user's browser.
+- regular listing-card anchors and visible text;
+- JSON-LD product and `ItemList` records;
+- `__NEXT_DATA__`;
+- `__INITIAL_STATE__`, Apollo, and preloaded state;
+- React/Next Flight `self.__next_f.push(...)` records;
+- canonical/OpenGraph product metadata;
+- page-source images, prices, brands, sizes, conditions, descriptions, and item URLs.
 
-## Request order
+When a search card is missing important fields, the frontend hydrates at most eight canonical product pages with three concurrent requests. Each hydration is another isolated one-page relay request, so there is no single resource-heavy Worker invocation.
 
-The frontend tries transports in this order:
+## Official query routes
 
-1. Bounded same-origin marketplace-results API.
-2. Optional ResaleMasterLab Browser Bridge extension.
-3. Direct page-origin fetch only for hosts known to permit CORS.
-4. Jina Reader fallback.
-5. Original live marketplace search link.
+- Depop: `/search/?q=...&page=...`, then brand and theme pages.
+- Grailed: `/shop?query=...&page=...` or `/sold?...`.
+- Poshmark: `/search?query=...&type=listings&src=ac&page=...`.
+- Mercari Japan: `/search?keyword=...&status=on_sale|sold_out&page=...`.
+- JDirectItems through ZenMarket: `search.aspx?...&searchMode=custom&stores=28`.
+- Rakuten through ZenMarket: `search.aspx?...&searchMode=custom&stores=0`.
+- Rakuten Rakuma through ZenMarket: `search.aspx?...&searchMode=custom&stores=25`.
+- Bunjang: `/search?q=...&page=...`.
 
-Known CORS-blocked marketplaces are never fetched directly from the page, so Depop, Grailed, and Poshmark no longer flood DevTools with predictable CORS errors.
+Depop's undocumented `webapi.depop.com` search endpoints are not used.
 
 ## Worker safety
 
-Revision: `frontend-marketplace-results-api-v9`
+Revision: `official-page-source-marketplaces-v10`
 
-The Worker does only one upstream request per `/api/listings` invocation. Safeguards include:
+- No Browser Run binding.
+- One official URL per relay request.
+- HTTPS-only marketplace allowlist.
+- At most two validated redirects.
+- 15-second upstream timeout.
+- 5.5 MB response-source limit so large Poshmark/Rakuten pages are not cut off too early.
+- Raw source is returned directly rather than JSON-encoding a multi-megabyte body.
+- Search and hydration fan-out use settled-result handling.
 
-- HTTPS-only marketplace allowlist;
-- no credentials or custom ports in source URLs;
-- manual redirect validation;
-- maximum two redirects;
-- 10-second upstream timeout;
-- 2 MB response-body limit;
-- no Browser Run binding;
-- no server-side marketplace parsing;
-- no server-side marketplace concurrency fan-out.
-
-The frontend still uses `Promise.allSettled`, so one failed marketplace or query cannot cancel successful results from other markets.
-
-## Install
+## Local development
 
 ```powershell
 npm ci
 npm run dev:windows
 ```
 
-Open:
-
-```text
-http://localhost:5173
-```
+Open `http://localhost:5173`.
 
 ## Optional Browser Bridge
 
-The extension is in `browser-extension/`.
+The included `browser-extension/` is only a fallback when a marketplace blocks Cloudflare egress. It fetches the same normal marketplace URL; it does not call undocumented listing APIs.
 
-1. Open `chrome://extensions` or `edge://extensions`.
-2. Enable Developer mode.
-3. Choose **Load unpacked**.
-4. Select the `browser-extension` folder.
-5. Reload ResaleMasterLab.
-
-The bridge is only a fallback when a marketplace blocks the relay or requires a browser-context response. It uses a single shared page listener and singleton content/background listeners.
-
-## Deploy to your workers.dev hostname
+## Deployment
 
 Target:
 
 ```text
 https://resalewebsite.unusualsuspectsclothing.workers.dev/
 ```
-
-Commands:
 
 ```powershell
 npm ci
@@ -94,37 +79,13 @@ npm run deploy
 npm run check:production
 ```
 
-Cloudflare Git Build settings:
-
-```text
-Build command: npm run build:windows
-Deploy command: npm run deploy
-Non-production deploy command: npm run preview:cloudflare
-```
-
-## Production health check
-
-```text
-https://resalewebsite.unusualsuspectsclothing.workers.dev/api/health
-```
-
-Expected fields:
+Expected `/api/health` fields:
 
 ```json
 {
-  "revision": "frontend-marketplace-results-api-v9",
-  "marketplaceRequests": "frontend-api-relay",
+  "revision": "official-page-source-marketplaces-v10",
+  "marketplaceRequests": "official-page-source-relay",
   "browserBindingAvailable": false,
-  "cloudflareMarketplaceFetches": "single-bounded-relay-only"
+  "cloudflareMarketplaceFetches": "one-official-page-per-relay-request"
 }
 ```
-
-The production checker also verifies that `/api/listings` returns the raw frontend-API envelope and rejects unrelated hosts.
-
-## Images
-
-Marketplace image URLs are extracted and filtered in the browser. The client rejects favicon, `.ico`, logo, sprite, QR-code, avatar, and DuckDuckGo site-icon URLs. Depop product photos remain direct first-party CDN URLs when published in the marketplace response.
-
-## Console warnings
-
-Messages mentioning `ObjectMultiplex`, `app-init-liveness`, `background-liveness`, or a large injected `contentscript.js` are not emitted by ResaleMasterLab. They come from another installed browser extension. The included bridge files are `content.js` and `background.js`.
