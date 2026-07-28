@@ -1,37 +1,25 @@
-# Validation — frontend-marketplaces-cors-safe-v8
+# Validation — frontend-marketplace-results-api-v9
 
 Completed in the packaging environment:
 
 - 14 focused Node regression tests passed.
-- 37 TypeScript/TSX files transpiled with zero syntax errors.
-- Focused TypeScript checking passed for the browser marketplace module and its analysis dependencies.
-- Focused page type checking passed with temporary React declarations, including the new marketplace result orchestration.
-- Browser extension JavaScript syntax checks passed.
+- The lightweight marketplace relay passed an executable fixture with a mocked Depop response.
+- The relay allowlist rejected an unrelated hostname with HTTP 400.
+- `app/api/listings/route.ts` passed focused TypeScript checking.
+- `app/lib/frontend-marketplaces.ts` and its local analysis dependencies passed focused TypeScript checking.
+- All application TypeScript and TSX sources passed syntax transpilation.
+- Browser-extension JavaScript passed syntax validation.
 - `manifest.json`, `package.json`, and `wrangler.jsonc` parse successfully.
-- The final ZIP passes CRC/integrity verification.
+- Final ZIP CRC/integrity verification passed.
 
 Design invariants:
 
-- `app/page.tsx` contains no calls to `/api/listings`, `/api/web-listings`, or `/api/image-proxy`.
-- `app/lib/frontend-marketplaces.ts` owns marketplace URL construction, CORS allow-listing, extension-first blocked-host requests, direct fetch for readable hosts, Jina Reader fallback, JSON/JSON-LD parsing, HTML card parsing, markdown link parsing, currency normalization, image filtering, and deduplication.
+- `app/lib/frontend-marketplaces.ts` calls `/api/listings?source=...` before other transports.
+- Known CORS-blocked hosts never reach page-origin `fetch()`.
+- `/api/listings` performs no Browser Run calls, DOM parsing, search-engine discovery, hydration, AI work, or comparison work.
+- The relay is HTTPS-only and marketplace-host allowlisted.
+- Upstream response text is limited to 2 MB and 10 seconds.
+- Marketplace parsing, image filtering, currency normalization, deduplication, and comparison matching stay client-side.
+- Marketplace and query fan-out uses `Promise.allSettled`.
 - `wrangler.jsonc` has no Browser Run binding.
-- `/api/listings`, `/api/web-listings`, and `/api/image-proxy` are lightweight disabled routes returning HTTP 410.
-- `/api/health` reports revision `frontend-marketplaces-cors-safe-v8` and `cloudflareMarketplaceFetches: false`.
-- The browser bridge extension has explicit marketplace host permissions and no Cloudflare marketplace proxy.
-- Depop images reject favicons, `.ico` files, logos, sprites, and DuckDuckGo site icons.
-- Marketplace batches continue using `Promise.allSettled`, so one CORS failure does not cancel other markets.
-
-A complete Vinext build was not run in the packaging environment because the internal npm registry repeatedly returned HTTP 503 for `zod-validation-error-4.0.2.tgz`. Cloudflare's build environment should run `npm ci` and `npm run build:windows` using the included lockfile.
-
-- Known CORS-blocked marketplace hosts never reach page-origin `fetch()`.
-- Bridge message responses use one shared page listener and a pending-request map.
-- Extension content/background listeners are guarded by singleton installation keys.
-
-
-## v8 validation results
-
-- 14 focused Node regression tests passed.
-- 37 TypeScript/TSX sources passed TypeScript syntax transpilation.
-- Browser extension content/background JavaScript passed `node --check`.
-- Browser extension and Wrangler JSON passed JSON validation.
-- Full dependency installation could not complete in the packaging environment because the npm mirror returned HTTP 503 for `zod-validation-error`; the lockfile was updated and the Cloudflare build can run `npm clean-install`.
+- `/api/health` reports revision `frontend-marketplace-results-api-v9`.

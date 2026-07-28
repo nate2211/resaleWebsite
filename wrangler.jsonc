@@ -17,6 +17,6 @@
     "enabled": true
   },
   "vars": {
-    "RML_MARKETPLACE_TRANSPORT": "browser"
+    "RML_MARKETPLACE_TRANSPORT": "frontend-api-relay"
   }
 }

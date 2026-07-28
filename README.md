@@ -1,33 +1,55 @@
-# ResaleMasterLab — Browser Marketplace Edition
+# ResaleMasterLab — Frontend Marketplace Results API
 
-ResaleMasterLab is a Vinext/React resale research application. This version moves marketplace discovery back into the user's browser so Cloudflare does not download, render, parse, or hydrate marketplace pages.
+ResaleMasterLab is a Vinext/React resale-research application. This revision restores the earlier **frontend API marketplace-results flow** without restoring the resource-heavy Cloudflare implementation that caused Worker Error 1102.
 
-## Why this version exists
+## How marketplace loading works
 
-Cloudflare Error 1102 means a Worker exceeded its CPU-time or memory allowance. The previous production route performed large HTML/JSON parsing and multiple Browser Run operations inside `/api/listings`; that work has been removed.
+For each marketplace URL, the frontend calls the same-origin endpoint:
 
-In revision `frontend-marketplaces-cors-safe-v8`:
+```text
+/api/listings?source=<encoded marketplace URL>
+```
 
-- `/api/listings` is intentionally disabled and returns HTTP 410.
-- `/api/web-listings` is intentionally disabled and returns HTTP 410.
-- The `BROWSER` binding is removed from `wrangler.jsonc`.
-- Depop, Grailed, Poshmark, Mercari Japan, ZenMarket, Rakuten, Rakuma, JDirectItems, Bunjang, eBay, Mercari US, and Facebook Marketplace requests originate from the browser.
-- Listing parsing, comparison matching, fee calculations, filters, and local AI ranking run client-side.
-- Cloudflare serves the application and lightweight same-origin features only.
+That endpoint is deliberately a thin relay. It performs one bounded upstream `GET`, streams at most 2 MB of raw response text back to the browser, and stops after 10 seconds. It does **not**:
 
-## Browser request order
+- invoke Browser Run;
+- render JavaScript pages;
+- crawl search engines;
+- hydrate product pages;
+- run marketplace HTML/JSON parsers;
+- compare listings or run AI analysis.
 
-For a marketplace known to block page-origin CORS, the client tries:
+All JSON, JSON-LD, HTML, markdown, image filtering, deduplication, comparisons, fees, filters, and local-AI ranking remain in `app/lib/frontend-marketplaces.ts` and `app/page.tsx` in the user's browser.
 
-1. The optional ResaleMasterLab Browser Bridge extension.
-2. Jina Reader (`r.jina.ai`) as a public reader fallback.
-3. A live-search link when neither readable transport succeeds.
+## Request order
 
-For hosts that are not on the known CORS-blocked list, a normal browser `fetch()` is attempted first. The app deliberately does **not** call `fetch()` against Depop, Grailed, Poshmark, ZenMarket, Rakuten, Mercari, eBay, or Facebook from the page origin, preventing the repeated CORS errors shown in DevTools.
+The frontend tries transports in this order:
 
-The AI Search card additionally uses `s.jina.ai` when available to discover eBay, Mercari US, Facebook Marketplace, and other unsupported secondhand stores.
+1. Bounded same-origin marketplace-results API.
+2. Optional ResaleMasterLab Browser Bridge extension.
+3. Direct page-origin fetch only for hosts known to permit CORS.
+4. Jina Reader fallback.
+5. Original live marketplace search link.
 
-Cross-origin policies are controlled by each marketplace. A normal webpage cannot read a CORS-blocked response. The included extension is the reliable browser-side option for those sites and still avoids all Cloudflare marketplace computation.
+Known CORS-blocked marketplaces are never fetched directly from the page, so Depop, Grailed, and Poshmark no longer flood DevTools with predictable CORS errors.
+
+## Worker safety
+
+Revision: `frontend-marketplace-results-api-v9`
+
+The Worker does only one upstream request per `/api/listings` invocation. Safeguards include:
+
+- HTTPS-only marketplace allowlist;
+- no credentials or custom ports in source URLs;
+- manual redirect validation;
+- maximum two redirects;
+- 10-second upstream timeout;
+- 2 MB response-body limit;
+- no Browser Run binding;
+- no server-side marketplace parsing;
+- no server-side marketplace concurrency fan-out.
+
+The frontend still uses `Promise.allSettled`, so one failed marketplace or query cannot cancel successful results from other markets.
 
 ## Install
 
@@ -52,33 +74,17 @@ The extension is in `browser-extension/`.
 4. Select the `browser-extension` folder.
 5. Reload ResaleMasterLab.
 
-The extension has explicit host permissions for the supported marketplace domains. It performs GET requests in the browser extension process and sends public response text back to the page for parsing. Version 1.1 uses a single shared page-response listener and singleton content/background listeners, so concurrent marketplace searches do not accumulate event listeners.
+The bridge is only a fallback when a marketplace blocks the relay or requires a browser-context response. It uses a single shared page listener and singleton content/background listeners.
 
-## Optional Jina key
+## Deploy to your workers.dev hostname
 
-Reader requests are attempted without a key first. To use a Jina API key from the browser, run this once in the browser console:
-
-```js
-localStorage.setItem("rml:jina-reader-key", "YOUR_JINA_KEY");
-```
-
-Remove it with:
-
-```js
-localStorage.removeItem("rml:jina-reader-key");
-```
-
-The key remains in that browser profile and is not sent to Cloudflare.
-
-## Deploy to the existing workers.dev hostname
-
-The Worker project name is `resalewebsite`, so deployment targets:
+Target:
 
 ```text
 https://resalewebsite.unusualsuspectsclothing.workers.dev/
 ```
 
-Use:
+Commands:
 
 ```powershell
 npm ci
@@ -88,11 +94,12 @@ npm run deploy
 npm run check:production
 ```
 
-Cloudflare Git Builds should use:
+Cloudflare Git Build settings:
 
 ```text
 Build command: npm run build:windows
 Deploy command: npm run deploy
+Non-production deploy command: npm run preview:cloudflare
 ```
 
 ## Production health check
@@ -105,24 +112,19 @@ Expected fields:
 
 ```json
 {
-  "revision": "frontend-marketplaces-cors-safe-v8",
-  "marketplaceRequests": "browser",
+  "revision": "frontend-marketplace-results-api-v9",
+  "marketplaceRequests": "frontend-api-relay",
   "browserBindingAvailable": false,
-  "cloudflareMarketplaceFetches": false
+  "cloudflareMarketplaceFetches": "single-bounded-relay-only"
 }
 ```
 
-The old `/api/listings` route should return HTTP 410. This is intentional and confirms that Cloudflare is not requesting marketplace pages.
+The production checker also verifies that `/api/listings` returns the raw frontend-API envelope and rejects unrelated hosts.
 
-## Depop images
+## Images
 
-Depop image URLs are loaded directly from their published CDN with `referrerPolicy="no-referrer"`. The client rejects favicon, `.ico`, logo, sprite, and DuckDuckGo icon URLs. When an image host blocks direct browser loading, the card uses the local placeholder; the Worker image proxy is intentionally disabled.
+Marketplace image URLs are extracted and filtered in the browser. The client rejects favicon, `.ico`, logo, sprite, QR-code, avatar, and DuckDuckGo site-icon URLs. Depop product photos remain direct first-party CDN URLs when published in the marketplace response.
 
-## Important limitation
+## Console warnings
 
-A deployed frontend cannot defeat marketplace CORS or login requirements. When direct fetch and public-reader access are blocked, ResaleMasterLab retains the original marketplace search URL and asks the user to open it directly or enable the included browser bridge. It does not bypass authentication, CAPTCHA, or anti-bot protections.
-
-
-## Browser-extension console warnings
-
-Messages mentioning `ObjectMultiplex`, `app-init-liveness`, `background-liveness`, or a bundled `contentscript.js` are not emitted by ResaleMasterLab or its included bridge. Those identifiers are commonly injected by another browser extension. The ResaleMasterLab bridge files are named `content.js` and `background.js`, and v1.1 installs each listener only once. Use an extension-free profile to identify the unrelated extension if those messages remain.
+Messages mentioning `ObjectMultiplex`, `app-init-liveness`, `background-liveness`, or a large injected `contentscript.js` are not emitted by ResaleMasterLab. They come from another installed browser extension. The included bridge files are `content.js` and `background.js`.

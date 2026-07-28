@@ -42,7 +42,7 @@ type TextResponse = {
   url: string;
   contentType: string;
   text: string;
-  transport: "direct" | "extension" | "reader";
+  transport: "frontend-api" | "direct" | "extension" | "reader";
 };
 
 type BridgeResponse = {
@@ -195,6 +195,39 @@ function mergeAbortSignals(primary: AbortSignal | undefined, timeoutMs: number) 
       primary?.removeEventListener("abort", onAbort);
     },
   };
+}
+
+
+async function frontendApiFetchText(url: string, signal?: AbortSignal): Promise<TextResponse> {
+  const merged = mergeAbortSignals(signal, DIRECT_TIMEOUT_MS + 4_000);
+  try {
+    const response = await fetch(`/api/listings?source=${encodeURIComponent(url)}`, {
+      method: "GET",
+      credentials: "same-origin",
+      cache: "no-store",
+      signal: merged.signal,
+      headers: { Accept: "application/json" },
+    });
+    const payload = await response.json() as BridgeResponse & {
+      body?: string;
+      truncated?: boolean;
+      workerRevision?: string;
+    };
+    if (!response.ok) {
+      throw new Error(payload.error || `Marketplace results API HTTP ${response.status}`);
+    }
+    if (payload.error) throw new Error(payload.error);
+    return {
+      ok: Boolean(payload.ok),
+      status: Number(payload.status) || 0,
+      url: payload.url || url,
+      contentType: payload.contentType || "",
+      text: (payload.body || "").slice(0, MAX_RESPONSE_CHARS),
+      transport: "frontend-api",
+    };
+  } finally {
+    merged.cleanup();
+  }
 }
 
 async function directFetchText(url: string, signal?: AbortSignal): Promise<TextResponse> {
@@ -359,43 +392,21 @@ async function readerFetchText(url: string, signal?: AbortSignal): Promise<TextR
 
 async function fetchReadableText(url: string, signal?: AbortSignal): Promise<TextResponse> {
   const failures: string[] = [];
-  const directAllowed = directBrowserFetchAllowed(url);
   const bridgeReady = extensionBridgeAvailable();
 
-  // Known marketplaces block page-origin CORS. Do not generate a guaranteed
-  // browser-console failure; use the extension process or public reader first.
-  if (!directAllowed) {
-    if (bridgeReady) {
-      try {
-        const bridged = await extensionFetchText(url, signal);
-        if (bridged.ok && bridged.text.trim()) return bridged;
-        failures.push(`extension HTTP ${bridged.status}`);
-      } catch (error) {
-        failures.push(error instanceof Error ? error.message : "extension bridge unavailable");
-      }
-    } else {
-      failures.push("browser bridge not installed");
-    }
-
-    try {
-      const reader = await readerFetchText(url, signal);
-      if (reader.ok && reader.text.trim()) return reader;
-      failures.push(`reader HTTP ${reader.status}`);
-    } catch (error) {
-      failures.push(error instanceof Error ? error.message : "reader unavailable");
-    }
-
-    throw new Error(failures.filter(Boolean).join("; ") || "Marketplace requires the browser bridge.");
-  }
-
+  // Restore the earlier frontend API marketplace-results flow. The same-origin
+  // route performs one bounded upstream fetch and returns the raw response; all
+  // JSON/HTML/markdown parsing remains here in the browser.
   try {
-    const direct = await directFetchText(url, signal);
-    if (direct.ok && direct.text.trim()) return direct;
-    failures.push(`direct HTTP ${direct.status}`);
+    const relayed = await frontendApiFetchText(url, signal);
+    if (relayed.ok && relayed.text.trim()) return relayed;
+    failures.push(`frontend API upstream HTTP ${relayed.status}`);
   } catch (error) {
-    failures.push(error instanceof Error ? error.message : "direct fetch blocked");
+    failures.push(error instanceof Error ? error.message : "frontend marketplace API unavailable");
   }
 
+  // Keep the bridge as an optional fallback for marketplaces that block
+  // Cloudflare egress, but never add one listener per request.
   if (bridgeReady) {
     try {
       const bridged = await extensionFetchText(url, signal);
@@ -403,6 +414,17 @@ async function fetchReadableText(url: string, signal?: AbortSignal): Promise<Tex
       failures.push(`extension HTTP ${bridged.status}`);
     } catch (error) {
       failures.push(error instanceof Error ? error.message : "extension bridge unavailable");
+    }
+  }
+
+  // Only attempt page-origin fetches for hosts known to permit CORS.
+  if (directBrowserFetchAllowed(url)) {
+    try {
+      const direct = await directFetchText(url, signal);
+      if (direct.ok && direct.text.trim()) return direct;
+      failures.push(`direct HTTP ${direct.status}`);
+    } catch (error) {
+      failures.push(error instanceof Error ? error.message : "direct fetch blocked");
     }
   }
 
@@ -414,7 +436,7 @@ async function fetchReadableText(url: string, signal?: AbortSignal): Promise<Tex
     failures.push(error instanceof Error ? error.message : "reader unavailable");
   }
 
-  throw new Error(failures.filter(Boolean).join("; ") || "No browser-readable transport succeeded.");
+  throw new Error(failures.filter(Boolean).join("; ") || "No marketplace-results transport succeeded.");
 }
 
 function walkJson(value: unknown, visit: (record: Record<string, unknown>) => void) {
@@ -677,7 +699,7 @@ export async function searchMarketplaceFrontend(input: {
     return {
       marketplace,
       status: "live",
-      message: `Loaded ${listings.length} browser-side listing${listings.length === 1 ? "" : "s"} using ${transport.join(" + ")}. Cloudflare did not fetch or parse the marketplace.`,
+      message: `Loaded ${listings.length} frontend-parsed listing${listings.length === 1 ? "" : "s"} using ${transport.join(" + ")}. The API only relayed a bounded raw marketplace response.`,
       sourceUrl,
       listings,
       hasMore: listings.length >= 20,
@@ -697,7 +719,7 @@ export async function searchMarketplaceFrontend(input: {
   return {
     marketplace,
     status: rejected.length === attempts.length ? "unavailable" : "unavailable",
-    message: `The browser could not read ${marketplace}'s cross-origin listing data. Open the live search page directly${extensionBridgeAvailable() ? "; the browser bridge responded but no product cards were readable" : ", or install the included browser bridge for CORS-blocked marketplaces"}.`,
+    message: `The frontend marketplace-results API and browser fallbacks could not read ${marketplace}'s listing data. Open the live search page directly${extensionBridgeAvailable() ? "; the browser bridge responded but no product cards were readable" : ", or install the included browser bridge for CORS-blocked marketplaces"}.`,
     sourceUrl,
     listings: [],
     hasMore: false,

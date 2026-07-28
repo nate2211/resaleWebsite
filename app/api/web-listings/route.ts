@@ -7,7 +7,7 @@ export async function POST() {
     listings: [],
     searches: [],
     frontendOnly: true,
-    workerRevision: "frontend-marketplaces-cors-safe-v8",
+    workerRevision: "frontend-marketplace-results-api-v9",
   }, {
     status: 410,
     headers: { "cache-control": "no-store" },

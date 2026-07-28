@@ -1,4 +1,4 @@
-# Deploy to Cloudflare workers.dev
+# Deploy the frontend marketplace-results API edition
 
 Target:
 
@@ -6,7 +6,7 @@ Target:
 https://resalewebsite.unusualsuspectsclothing.workers.dev/
 ```
 
-## Dashboard Git Build settings
+## Cloudflare Git Build settings
 
 ```text
 Build command: npm run build:windows
@@ -25,16 +25,14 @@ npm run deploy
 npm run check:production
 ```
 
-`wrangler.jsonc` has:
+`wrangler.jsonc` uses:
 
-- `name: resalewebsite`
-- `workers_dev: true`
-- no custom-domain routes
-- no Browser Run binding
-- `RML_MARKETPLACE_TRANSPORT=browser`
+- Worker name `resalewebsite`;
+- `workers_dev: true`;
+- no custom-domain routes;
+- no Browser Run binding;
+- `RML_MARKETPLACE_TRANSPORT=frontend-api-relay`.
 
-Marketplace requests are made by the website in the user's browser. `/api/listings`, `/api/web-listings`, and `/api/image-proxy` are disabled and return HTTP 410 so old cached clients cannot accidentally restart Worker scraping.
+`/api/listings` is a bounded raw-response relay. Each invocation makes at most one active marketplace request at a time, follows at most two validated redirects, stops after 10 seconds, and reads at most 2 MB. Marketplace parsing and comparisons run in the browser.
 
-## Browser Bridge
-
-Install the optional unpacked extension from `browser-extension/` for marketplaces that block ordinary cross-origin browser requests.
+`/api/web-listings` and `/api/image-proxy` remain disabled because AI discovery and image filtering are handled client-side.

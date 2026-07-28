@@ -22,16 +22,26 @@ if (!homepage.response.ok || !/ResaleMasterLab/i.test(homepage.text)) {
 const healthResult = await read("/api/health");
 if (!healthResult.response.ok) throw new Error(`/api/health returned HTTP ${healthResult.response.status}.`);
 const health = JSON.parse(healthResult.text);
-if (health.revision !== "frontend-marketplaces-cors-safe-v8") {
+if (health.revision !== "frontend-marketplace-results-api-v9") {
   throw new Error(`The domain is serving an older revision: ${health.revision || "unknown"}.`);
 }
-if (health.cloudflareMarketplaceFetches !== false || health.marketplaceRequests !== "browser") {
-  throw new Error("The deployed version is not in browser-side marketplace mode.");
+if (health.marketplaceRequests !== "frontend-api-relay" || health.cloudflareMarketplaceFetches !== "single-bounded-relay-only") {
+  throw new Error("The deployed version is not using the bounded frontend marketplace-results relay.");
 }
 
-const disabledRoute = await read("/api/listings?marketplace=Depop&q=supreme");
-if (disabledRoute.response.status !== 410) {
-  throw new Error(`The old marketplace Worker route is still active (HTTP ${disabledRoute.response.status}).`);
+const relayPath = `/api/listings?source=${encodeURIComponent("https://www.depop.com/search/?q=supreme&page=1")}`;
+const relayResult = await read(relayPath);
+if (!relayResult.response.ok) {
+  throw new Error(`The marketplace-results API returned HTTP ${relayResult.response.status}.`);
+}
+const relay = JSON.parse(relayResult.text);
+if (relay.transport !== "frontend-api" || typeof relay.status !== "number" || typeof relay.body !== "string") {
+  throw new Error("The marketplace-results API did not return the expected raw-response envelope.");
+}
+
+const rejected = await read(`/api/listings?source=${encodeURIComponent("https://example.com/")}`);
+if (rejected.response.status !== 400) {
+  throw new Error(`The marketplace allowlist did not reject an unrelated host (HTTP ${rejected.response.status}).`);
 }
 
 console.log(JSON.stringify({
@@ -39,7 +49,8 @@ console.log(JSON.stringify({
   revision: health.revision,
   homepage: homepage.response.status,
   marketplaceTransport: health.marketplaceRequests,
-  cloudflareMarketplaceFetches: health.cloudflareMarketplaceFetches,
-  legacyMarketplaceRoute: disabledRoute.response.status,
+  relayUpstreamStatus: relay.status,
+  relayCharacters: relay.body.length,
+  allowlistRejection: rejected.response.status,
 }, null, 2));
-console.log("Production shell is healthy. Run a marketplace search in the browser; install browser-extension/ when a site blocks CORS.");
+console.log("Production shell and the bounded frontend marketplace-results API are healthy.");

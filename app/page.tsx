@@ -3236,7 +3236,7 @@ function BrowseView({
       ...entry,
       status: requestMarkets.includes(entry.marketplace) ? "loading" : "idle",
       message: requestMarkets.includes(entry.marketplace)
-        ? "Requesting public listings from this browser…"
+        ? "Requesting marketplace results through the frontend API…"
         : "Not selected for this scan.",
     })));
 
@@ -3749,7 +3749,7 @@ function BrowseView({
                     Include
                   </label>
                 </div>
-                <p>Search public secondhand listings on eBay, Mercari US, Facebook Marketplace, and other resale sites from your browser. Install the included Browser Bridge when a site blocks CORS.</p>
+                <p>Search public secondhand listings through the lightweight frontend marketplace-results API. Parsing and comparisons stay in your browser; the included Browser Bridge remains an optional fallback.</p>
                 <label className="ai-market-search-field">
                   <span aria-hidden="true">⌕</span>
                   <input

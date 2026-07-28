@@ -3,10 +3,10 @@ export const runtime = "edge";
 export async function GET() {
   return Response.json({
     ok: true,
-    revision: "frontend-marketplaces-cors-safe-v8",
-    marketplaceRequests: "browser",
+    revision: "frontend-marketplace-results-api-v9",
+    marketplaceRequests: "frontend-api-relay",
     browserBindingAvailable: false,
-    cloudflareMarketplaceFetches: false,
+    cloudflareMarketplaceFetches: "single-bounded-relay-only",
   }, {
     headers: { "cache-control": "no-store" },
   });
