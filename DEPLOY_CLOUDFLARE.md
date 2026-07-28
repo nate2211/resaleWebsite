@@ -1,121 +1,106 @@
-# Deploy the ResaleMasterLab frontend to Cloudflare
+# Deploy ResaleMasterLab to Cloudflare Workers
 
-## Requested Wrangler configuration
+## Production configuration
 
-The project uses this exact assets-only SPA configuration:
+Production uses one source-of-truth file: `wrangler.jsonc`.
 
-```toml
-name = "audiomasterlab"
-compatibility_date = "2026-06-22"
+It deploys the Vinext App Router Worker, all `/api/*` routes, the `BROWSER`
+Quick Actions binding, and the custom domains `resalemasterlab.com` and
+`www.resalemasterlab.com`. Do not deploy production with the assets-only file.
 
-[assets]
-directory = "./build"
-not_found_handling = "single-page-application"
-```
+Cloudflare prerequisites:
 
-Cloudflare serves `build/index.html` for navigation paths that do not match a static file.
-
-## Development styling and marketplace rendering
-
-`npm run dev:windows` starts the Vinext App Router development server with the Cloudflare Vite environment. This keeps
-`app/globals.css` on Vite hot reload while also attaching the remote Browser Run
-binding used only when ordinary public marketplace requests return zero cards.
-Authenticate with Cloudflare once before using the remote binding:
+1. The `resalemasterlab.com` zone must be active in the same Cloudflare account.
+2. Remove conflicting CNAME records on the apex or `www` hostname before the
+   first Custom Domain deployment.
+3. The Cloudflare account must support Browser Run.
+4. Authenticate Wrangler and select the account that owns the zone. Set `CLOUDFLARE_ACCOUNT_ID` when your login can access more than one account.
 
 ```powershell
+$env:CLOUDFLARE_ACCOUNT_ID = "YOUR_ACCOUNT_ID"
+npm ci
 npx wrangler login
-Remove-Item -Recurse -Force node_modules\.vite -ErrorAction SilentlyContinue
-npm run dev:windows
-```
-
-For interface-only development without Cloudflare or Browser Run, use:
-
-```powershell
-npm run dev:local:windows
-```
-
-The local-only mode still loads the complete stylesheet, but JavaScript-heavy
-marketplace fallbacks and AI web browsing such as rendered Depop, ZenMarket/Rakuten, and public product pages are unavailable.
-
-## Production styling
-
-The production command enables `@cloudflare/vite-plugin` only for the Vinext build and then prepares the requested `build` directory:
-
-```bash
-npm run build:verified
-```
-
-`vite.config.ts` uses `wrangler.vinext-build.toml` for production and Cloudflare-enabled development. `scripts/prepare-static-build.mjs` now distinguishes a static export from Vinext's normal full-stack Worker output. Full-stack builds are accepted when a generated `wrangler.json`, compiled CSS, and JavaScript are present; stale `build/` output is removed. Static-only deployment remains available through `npm run build:static` and requires a real exported `index.html`.
-
-Deploy with the latest Wrangler runtime so the requested June 22, 2026 compatibility date is recognized:
-
-```bash
-npx wrangler@latest login
+npx wrangler whoami
+npm test
 npm run deploy
 ```
 
-## Important assets-only limitation
+The deploy command is deliberately explicit:
 
-This exact Wrangler configuration contains no Worker `main` entry. It deploys the frontend as a static SPA, but it cannot execute the same-origin server handlers under `app/api/*`. Features that require server-side marketplace fetching need the full-stack Worker deployment configuration or a separate public API origin.
-
-## Marketplace APIs in production
-
-`wrangler.toml` is the requested assets-only SPA configuration. It does not run marketplace, monitoring, authenticity, engagement, or AI endpoints. Deploy the full-stack Worker instead:
-
-```powershell
-npm run deploy
+```text
+npx @vinext/cloudflare deploy --config wrangler.jsonc
 ```
 
-For a deliberately static frontend-only deployment:
+It must not be replaced with `npx wrangler deploy`, `npm run deploy:static`, or
+an assets-only dashboard deployment. Vinext performs compatibility checks and
+deploys the generated App Router Worker using the same configuration that Vite
+uses during the build.
+
+## Verify the deployed Worker
+
+Run:
+
+```powershell
+npm run check:production
+```
+
+Or inspect the endpoints directly:
+
+```powershell
+curl.exe -i "https://resalemasterlab.com/api/health"
+curl.exe -i "https://resalemasterlab.com/api/listings?marketplace=Depop&q=raf%20simons&page=0&mode=active"
+```
+
+The health response must show:
+
+```json
+{
+  "revision": "depop-domain-production-v3",
+  "browserBindingAvailable": true
+}
+```
+
+The listings response also includes the `x-rml-worker-revision` response header
+and `diagnostics.workerRevision`. If either shows an older revision, the domain
+is attached to an older Worker or a stale deployment was used.
+
+## Depop production strategy
+
+Depop is queried through several independent, settled paths:
+
+1. Ordinary public search HTML.
+2. Browser Run rendered search HTML.
+3. Browser Run rendered `/products/` links.
+4. Bing and DuckDuckGo public-index discovery.
+5. Browser-rendered web-index discovery when ordinary index requests fail.
+6. Ordinary and rendered product-page hydration for price and image metadata.
+
+A canonical Depop product link is now retained even when Depop blocks price
+hydration. The card is marked `Price unavailable — open Depop` rather than
+removing the listing and making the marketplace appear empty.
+
+## Static preview only
+
+`wrangler.static.toml` is retained only for a frontend-only demonstration:
 
 ```powershell
 npm run deploy:static
 ```
 
-The full-stack command uses the official Vinext Cloudflare deployment adapter,
-keeps `/api/*` on the same origin as the browser application, and includes the
-`BROWSER` binding declared in `wrangler.vinext-build.toml`. Ordinary HTTP is tried
-first; Browser Run renders built-in dynamic marketplace sources when no public cards are found. AI Search uses Browser Run content and link extraction for JavaScript-heavy search/product pages, but filters out all built-in marketplace domains so the AI card contributes additional stores. The AI button still runs selected built-in adapters and Rakuten through ZenMarket in the same bounded parallel batch. The browser binding uses remote mode in development because Quick Actions do not run in the local-only Workers runtime.
+That deployment cannot execute `/api/listings`, AI Search, watch checks, or
+Browser Run and must not be attached to the production domain.
 
+## Logs
 
-## Depop production checklist
-
-Depop is a JavaScript-heavy source and must use the full-stack Worker plus the
-remote `BROWSER` binding. The listing route now decodes the production Quick
-Action envelope (`success` + `result`) before sending rendered HTML to the Depop
-parser. When a search page provides links without readable card data, it also
-runs the `links` Quick Action and renders the individual `/products/` page to
-recover public Open Graph/JSON-LD price and image data.
-
-After deployment, verify the route directly:
+Stream production logs while issuing a Depop request:
 
 ```powershell
-curl.exe "https://YOUR-DOMAIN/api/listings?marketplace=Depop&q=supreme&page=0&mode=active"
+npx wrangler tail resalemasterlab --format pretty
 ```
 
-A healthy response should report `browserBindingAvailable: true` when ordinary
-Depop HTML returned no cards, and one source failure must not cancel other
-marketplaces because all production fan-outs use settled-result handling.
-
-## Worker runtime module during Vinext builds
-
-The Browser Run binding is read with `import("cloudflare:workers")`, which is
-the binding-access pattern recommended by Vinext and Cloudflare. This module is
-provided by the Workers runtime and is not an npm package. `vite.config.ts`
-therefore lists `cloudflare:workers` in `build.rolldownOptions.external`; without
-that entry, Vinext's client-reference analysis can fail before the server build
-with a module-resolution error.
+The API response diagnostics report whether the Browser Run binding was found,
+how many rendered batches completed, how many indexed discovery batches ran,
+and which Worker revision served the request.
 
 
-## Vinext development root route
-
-The full-stack Vite configuration reads `wrangler.vinext-build.toml`. That file
-must declare `main = "vinext/server/app-router-entry"`, and its asset fallback must be
-`not_found_handling = "none"`. The Worker entry delegates requests to
-`vinext/server/app-router-entry`. Using an assets-only SPA Wrangler file for Vinext
-development causes repeated `GET / 404` responses because the asset middleware
-handles `/` before the App Router.
-
-## Local console diagnostics
-
-Runtime PWA links are relative to the active origin, so localhost must request `/manifest.webmanifest`, `/favicon.svg`, and icons from port 5173 rather than the production hostname. `contentscript.js` / `ObjectMultiplex` liveness warnings come from injected browser extensions and are not part of the Worker or React bundle. Use a clean browser profile when verifying the application console. Transient same-origin API failures are retried, and query/page fetching is concurrency-limited.
+On Windows, `DEPLOY_PRODUCTION_WINDOWS.bat` runs the install, tests, full-stack deploy, and production verification in one command.

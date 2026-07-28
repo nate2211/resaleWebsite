@@ -10,7 +10,7 @@ const validator = await readFile(
   "utf8",
 );
 const wrangler = await readFile(
-  new URL("../wrangler.vinext-build.toml", import.meta.url),
+  new URL("../wrangler.jsonc", import.meta.url),
   "utf8",
 );
 
@@ -19,5 +19,5 @@ test("builds validate the installed Vinext App Router export first", () => {
   assert.match(packageJson.scripts["build:windows"], /^node scripts\/validate-vinext-entry\.mjs && /);
   assert.match(validator, /\.\/server\/app-router-entry/);
   assert.match(validator, /vinext\/server\/app-router-entry/);
-  assert.match(wrangler, /^main\s*=\s*"vinext\/server\/app-router-entry"/m);
+  assert.match(wrangler, /"main"\s*:\s*"vinext\/server\/app-router-entry"/);
 });

@@ -503,3 +503,11 @@ A normal Vinext App Router build produces Worker, RSC, SSR, client JavaScript, a
 
 - `DEPLOY_CLOUDFLARE.md`: production environment, build, deploy, custom-domain,
   route verification, page-source, and Search Console checklist.
+
+
+## Verify the production domain
+
+After `npm run deploy`, run `npm run check:production`. The `/api/health`
+response must report revision `depop-domain-production-v3` and
+`browserBindingAvailable: true`. This also verifies that the custom domain is
+serving the full-stack Worker rather than an older or assets-only deployment.

@@ -9,9 +9,9 @@ import { defineConfig } from "vite";
  *   Cloudflare bindings, including the remote Browser Run fallback.
  * - `vinext build`: the production App Router RSC/SSR Worker build.
  *
- * The production plugin reads wrangler.vinext-build.toml. The user-facing
- * wrangler.toml remains the requested assets-only SPA configuration for the
- * explicit frontend-only deployment command.
+ * The production plugin and deployment command both read wrangler.jsonc so the
+ * App Router Worker, API routes, custom domain, and Browser Run binding cannot
+ * drift apart. The optional assets-only deployment uses wrangler.static.toml.
  */
 export default defineConfig(({ command }) => {
   // Vinext's App Router must own the Vite development server. Keep the
@@ -50,7 +50,7 @@ export default defineConfig(({ command }) => {
       ...(enableCloudflare
         ? [
             cloudflare({
-              configPath: "./wrangler.vinext-build.toml",
+              configPath: "./wrangler.jsonc",
               viteEnvironment: {
                 name: "rsc",
                 childEnvironments: ["ssr"],

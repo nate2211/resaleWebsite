@@ -23,7 +23,7 @@ test("persists commercial Browse filters and loads AI from the navbar", async ()
 test("packages crawlable public pages and Google-facing metadata", async () => {
   const [layout, sitemap, robots, manifest, faq, wrangler] = await Promise.all([
     source("app/layout.tsx"), source("app/sitemap.ts"), source("app/robots.ts"),
-    source("app/manifest.ts"), source("app/faq/page.tsx"), source("wrangler.toml"),
+    source("app/manifest.ts"), source("app/faq/page.tsx"), source("wrangler.static.toml"),
   ]);
 
   for (const token of ["ResaleMasterLab", "metadataBase", "openGraph", "twitter", "application/ld+json"]) {
@@ -36,8 +36,8 @@ test("packages crawlable public pages and Google-facing metadata", async () => {
   assert.match(robots, /sitemap/);
   assert.match(manifest, /icon-maskable-512\.png/);
   assert.match(faq, /FAQPage/);
-  assert.match(wrangler, /name = "audiomasterlab"/);
-  assert.match(wrangler, /compatibility_date = "2026-06-22"/);
+  assert.match(wrangler, /name = "resalemasterlab-static"/);
+  assert.match(wrangler, /compatibility_date = "2026-07-28"/);
   assert.match(wrangler, /directory = "\.\/build"/);
   assert.match(wrangler, /not_found_handling = "single-page-application"/);
 });
@@ -69,7 +69,7 @@ test("loads the same ResaleMasterLab styling in development and production", asy
   assert.match(vite, /devSourcemap: true/);
   assert.match(vite, /cssCodeSplit: false/);
   assert.match(vite, /@cloudflare\/vite-plugin/);
-  assert.match(vite, /configPath: "\.\/wrangler\.vinext-build\.toml"/);
+  assert.match(vite, /configPath: "\.\/wrangler\.jsonc"/);
   assert.match(vite, /command === "serve" \|\| command === "build"/);
   assert.match(vite, /\.\.\.\(enableCloudflare/);
   assert.match(packageJson, /prepare-static-build\.mjs/);

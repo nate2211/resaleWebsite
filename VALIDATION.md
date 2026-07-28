@@ -37,7 +37,7 @@ accepts either a full-stack Vinext Worker artifact (`wrangler.json`, JavaScript,
   listed-before, minimum/maximum price, newest/oldest, and price-direction filters.
 - Public About, Methodology, FAQ, Contact, Accessibility, Privacy, and Terms
   routes are included in the sitemap and rendered independently of local workspace data.
-- The requested assets-only `wrangler.toml`, `build` preparation and CSS validation,
+- The optional assets-only `wrangler.static.toml`, `build` preparation and CSS validation,
   icons, manifest, robots, sitemap, Open Graph card, structured data, and static
   security/cache headers are packaged.
 
@@ -47,3 +47,7 @@ accepts either a full-stack Vinext Worker artifact (`wrangler.json`, JavaScript,
 - The three ZenMarket adapters are modeled separately: JDirectItems Auction uses store `28`, Rakuten uses store `0`, and Rakuma uses store `25`. Each proxy route receives static parsing and Browser Run before its original-market fallback; ZenMarket renders share a two-slot queue so selecting all three does not overload the binding. Rakuten discovery uses the captured canonical cross-site query (`/en/search.aspx?q=<query>&p=<page>&searchMode=custom&stores=0`) as its primary route. Rendered doT cards and structured AJAX/JSON records retain title, image, condition, JPY price, and the correct adapter-specific ZenMarket product URL.
 - The supplied current ZenMarket search capture was executed against the production parser. It correctly returns zero static product cards because it is a JavaScript/AJAX shell, so it proceeds to Browser Run instead of producing false listings or prematurely selecting the official Rakuten fallback.
 - Rakuten recovery now parses product-level JSON-LD and inline ItemList records so each title, JPY price, canonical URL, and image stays paired. Truncated item URLs are rejected, discovered images survive hydration when detail pages omit metadata, and rendered product images use `referrerPolicy="no-referrer"` to avoid referrer-based CDN failures.
+
+- Production deployment now has one source-of-truth `wrangler.jsonc` used by both Vite and `@vinext/cloudflare deploy`. It declares the Vinext App Router entry, `BROWSER` binding, `nodejs_compat`, source maps, observability, workers.dev previews, and Custom Domain routes for the apex and `www` hostnames. The assets-only configuration moved to `wrangler.static.toml` so it cannot be selected accidentally by the production command.
+- `/api/health` and every listing response expose revision `depop-domain-production-v3`; `npm run check:production` fails when the domain serves an older Worker, lacks Browser Run, or returns no Depop product links.
+- Depop has a rendered web-index fallback in addition to direct/rendered marketplace search. Canonical product links remain visible with an explicit price-unavailable state when product hydration is blocked, preventing a source-level anti-bot response from collapsing the marketplace to zero cards.

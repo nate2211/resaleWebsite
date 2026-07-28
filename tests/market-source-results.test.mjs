@@ -110,7 +110,7 @@ test("normalizes public marketplace records and yen snippets", async (t) => {
 test("uses Vinext routing and Cloudflare Browser Run only as a zero-card fallback", async () => {
   const [route, wrangler, packageJson, vite] = await Promise.all([
     source("app/api/listings/route.ts"),
-    source("wrangler.vinext-build.toml"),
+    source("wrangler.jsonc"),
     source("package.json"),
     source("vite.config.ts"),
   ]);
@@ -124,9 +124,11 @@ test("uses Vinext routing and Cloudflare Browser Run only as a zero-card fallbac
   assert.match(route, /withZenMarketBrowserSlot/);
   assert.match(route, /import\("cloudflare:workers"\)/);
   assert.match(route, /runtime\.env/);
-  assert.match(wrangler, /\[browser\]/);
-  assert.match(wrangler, /binding = "BROWSER"/);
-  assert.match(wrangler, /remote = true/);
+  assert.match(wrangler, /"browser"\s*:/);
+  assert.match(wrangler, /"binding"\s*:\s*"BROWSER"/);
+  assert.match(wrangler, /"custom_domain"\s*:\s*true/);
+  assert.match(packageJson, /@vinext\/cloudflare deploy --config wrangler\.jsonc/);
+  assert.match(route, /browserIndexedDepopItems/);
   assert.match(packageJson, /vinext dev -p 5173 -H 0\.0\.0\.0/);
   assert.doesNotMatch(packageJson, /vite --mode cloudflare/);
   assert.match(vite, /command === "serve" \|\| command === "build"/);

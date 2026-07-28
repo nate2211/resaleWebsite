@@ -6,7 +6,7 @@ const required = [
   "app/contact/page.tsx", "app/accessibility/page.tsx", "app/privacy/page.tsx",
   "app/terms/page.tsx", "app/not-found.tsx", "DEPLOY_CLOUDFLARE.md", "public/favicon.svg", "public/icon-192.png",
   "public/icon-512.png", "public/apple-touch-icon.png", "public/og-card.png",
-  "wrangler.toml",
+  "wrangler.jsonc", "wrangler.static.toml", "app/api/health/route.ts",
 ];
 for (const file of required) {
   if (!existsSync(file)) throw new Error(`Missing SEO/deployment file: ${file}`);
@@ -31,4 +31,8 @@ const faq = readFileSync("app/faq/page.tsx", "utf8");
 if (!faq.includes("FAQPage") || !faq.includes("International Markets")) {
   throw new Error("The public FAQ must include structured FAQ data and current marketplaces.");
 }
-console.log("SEO and Cloudflare deployment files are present.");
+const productionConfig = readFileSync("wrangler.jsonc", "utf8");
+for (const token of ["resalemasterlab.com", '"custom_domain": true', '"binding": "BROWSER"', '"main": "vinext/server/app-router-entry"']) {
+  if (!productionConfig.includes(token)) throw new Error(`Production Wrangler config is missing ${token}`);
+}
+console.log("SEO and full-stack Cloudflare deployment files are present.");

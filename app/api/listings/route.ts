@@ -3,6 +3,10 @@ import { extractMarketplaceEngagement, type EngagementMarketplace, type Engageme
 import { apparelSearchTerm, inferApparelType, type ApparelType } from "../../lib/apparel";
 import { normalizePublicListingRecord, priceFromPublicText } from "../../lib/public-listing-record";
 
+export const runtime = "edge";
+export const dynamic = "force-dynamic";
+const WORKER_REVISION = "depop-domain-production-v3";
+
 type Marketplace =
   | "Depop" | "Grailed" | "Poshmark" | "Mercari Japan"
   | "JDirectItems Auction" | "Rakuten" | "Rakuten Rakuma"
@@ -123,6 +127,7 @@ function reply(value: unknown, status = 200) {
       "cache-control": "no-store, max-age=0",
       "cdn-cache-control": "no-store",
       "cloudflare-cdn-cache-control": "no-store",
+      "x-rml-worker-revision": WORKER_REVISION,
     },
   });
 }
@@ -1214,6 +1219,39 @@ async function browserRenderedItems(
   return zenMarketBacked ? withZenMarketBrowserSlot(execute) : execute();
 }
 
+async function browserIndexedDepopItems(query: string, page: number) {
+  if (!(await browserRunBinding())) return { items: [] as DiscoveredItem[], attempted: 0, failed: 0 };
+  const first = page * 30 + 1;
+  const searches = [
+    `https://www.bing.com/search?count=30&first=${first}&q=${encodeURIComponent(`site:depop.com/products ${query}`)}`,
+    `https://html.duckduckgo.com/html/?q=${encodeURIComponent(`site:depop.com/products ${query}`)}&s=${page * 30}`,
+  ];
+  const found = new Map<string, DiscoveredItem>();
+  let failed = 0;
+  for (const searchUrl of searches) {
+    try {
+      const [htmlAttempt, linksAttempt] = await Promise.allSettled([
+        fetchRenderedText(searchUrl),
+        fetchRenderedLinks(searchUrl),
+      ]);
+      if (htmlAttempt.status === "fulfilled") {
+        for (const item of searchHtmlItems(htmlAttempt.value, "Depop", searchUrl)) {
+          found.set(item.url, mergeDiscovered(found.get(item.url), item));
+        }
+      } else failed += 1;
+      if (linksAttempt.status === "fulfilled") {
+        for (const item of renderedLinksToItems(linksAttempt.value, "Depop", searchUrl)) {
+          found.set(item.url, mergeDiscovered(found.get(item.url), item));
+        }
+      } else failed += 1;
+      if (found.size >= 12) break;
+    } catch {
+      failed += 1;
+    }
+  }
+  return { items: [...found.values()], attempted: searches.length, failed };
+}
+
 async function discover(marketplace: Marketplace, query: string, page: number, mode: "active" | "sold") {
   const directUrls = sourceSearchCandidates(marketplace, query, mode, page);
   const directRequest = async (directUrl: string) =>
@@ -1303,6 +1341,11 @@ async function discover(marketplace: Marketplace, query: string, page: number, m
   const indexedSettled = await Promise.allSettled(indexedRequests);
   for (const batch of indexedSettled) if (batch.status === "fulfilled") mergeItems(batch.value);
 
+  const depopBrowserIndex = marketplace === "Depop" && items.size === 0
+    ? await browserIndexedDepopItems(query, page)
+    : { items: [] as DiscoveredItem[], attempted: 0, failed: 0 };
+  mergeItems(depopBrowserIndex.items);
+
   const allBatches = [...directSettled, ...indexedSettled];
   const browserBindingAvailable = Boolean(await browserRunBinding());
   return {
@@ -1314,6 +1357,8 @@ async function discover(marketplace: Marketplace, query: string, page: number, m
       + (mercariApi.status === "rejected" ? 1 : 0) + browserBatches.failed,
     mercariApiItems: mercariApi.status === "fulfilled" ? mercariApi.value.items.length : 0,
     indexedSearchBatches: indexedRequests.length,
+    depopBrowserIndexBatches: depopBrowserIndex.attempted,
+    depopBrowserIndexFailures: depopBrowserIndex.failed,
     browserRenderedBatches: browserBatches.successful,
     browserRenderedUrls: browserBatches.batches.map((batch) => batch.url),
     browserBindingAvailable,
@@ -2109,7 +2154,7 @@ async function hydrate(marketplace: Marketplace, item: DiscoveredItem) {
       || (marketplace === "Mercari Japan" || marketplace.includes("Rakuten") || marketplace === "JDirectItems Auction" ? "JPY"
         : marketplace === "Bunjang" ? "KRW" : marketplace === "Goofish" ? "CNY" : "USD");
     const price = toUsd(rawPrice, currency);
-    if (!title || (!price && marketplace !== "Goofish")) return null;
+    if (!title || (!price && marketplace !== "Goofish" && marketplace !== "Depop")) return null;
     const importCosts = price ? landedImportCosts(marketplace, price) : undefined;
     const pageEngagement = ["Depop", "Grailed", "Poshmark"].includes(marketplace)
       ? extractMarketplaceEngagement(html, item.url, marketplace as EngagementMarketplace)
@@ -2118,7 +2163,9 @@ async function hydrate(marketplace: Marketplace, item: DiscoveredItem) {
       id: `live-${createHash("sha1").update(item.url).digest("hex").slice(0, 14)}`,
       marketplace, title: title.replace(/\s*[|·-]\s*(Depop|Grailed|Poshmark|Mercari|ZenMarket|Bunjang|Superbuy).*$/i, ""), brand: "Unspecified",
       price, shipping: importCosts?.total ?? 0,
-      condition: price ? "Check listing" : "Price unavailable — open source",
+      condition: price ? "Check listing" : marketplace === "Depop"
+        ? "Price unavailable — open Depop"
+        : "Price unavailable — open source",
       size: "Unknown",
       articleType: inferApparelType(title, description),
       image: absolute(meta(html, ["og:image", "twitter:image"]), item.url) || item.image || "", url: item.url,
@@ -2135,7 +2182,7 @@ async function hydrate(marketplace: Marketplace, item: DiscoveredItem) {
       || (["Mercari Japan", "JDirectItems Auction", "Rakuten", "Rakuten Rakuma"].includes(marketplace) ? "JPY"
         : marketplace === "Bunjang" ? "KRW" : marketplace === "Goofish" ? "CNY" : "USD");
     const price = toUsd(publicPrice.amount, currency);
-    if ((!price && marketplace !== "Goofish") || !item.title || !item.url) return null;
+    if ((!price && marketplace !== "Goofish" && marketplace !== "Depop") || !item.title || !item.url) return null;
     const importCosts = price ? landedImportCosts(marketplace, price) : undefined;
     return {
       id: `live-${createHash("sha1").update(item.url).digest("hex").slice(0, 14)}`,
@@ -2144,7 +2191,9 @@ async function hydrate(marketplace: Marketplace, item: DiscoveredItem) {
       brand: "Unspecified",
       price,
       shipping: importCosts?.total ?? 0,
-      condition: price ? "Check listing" : "Price unavailable — open source",
+      condition: price ? "Check listing" : marketplace === "Depop"
+        ? "Price unavailable — open Depop"
+        : "Price unavailable — open source",
       size: "Unknown",
       articleType: inferApparelType(item.title, item.description),
       image: item.image || "",
@@ -2193,6 +2242,7 @@ export const __marketSourceTest = {
   fetchRenderedText,
   fetchRenderedLinks,
   renderedLinksToItems,
+  browserIndexedDepopItems,
   hydrate,
   mercariDpop,
   mercariSearchBody,
@@ -2242,6 +2292,8 @@ export async function GET(request: Request) {
           failedBatches: 1,
           mercariApiItems: 0,
           indexedSearchBatches: 0,
+          depopBrowserIndexBatches: 0,
+          depopBrowserIndexFailures: 0,
           browserRenderedBatches: 0,
           browserRenderedUrls: [] as string[],
           browserBindingAvailable: Boolean(await browserRunBinding()),
@@ -2282,7 +2334,13 @@ export async function GET(request: Request) {
         failedDiscoveryBatches: discovery.failedBatches,
         mercariApiItems: discovery.mercariApiItems,
         indexedSearchBatches: discovery.indexedSearchBatches,
+        depopBrowserIndexBatches: discovery.depopBrowserIndexBatches,
+        depopBrowserIndexFailures: discovery.depopBrowserIndexFailures,
         browserBindingAvailable: discovery.browserBindingAvailable,
+        workerRevision: WORKER_REVISION,
+        depopStrategy: marketplace === "Depop"
+          ? "direct-static + Browser Run search + rendered links + rendered web-index fallback + product hydration"
+          : undefined,
         browserRenderedBatches: discovery.browserRenderedBatches,
         browserRenderedUrls: discovery.browserRenderedUrls,
         discoveredUrls: discovered.length,
