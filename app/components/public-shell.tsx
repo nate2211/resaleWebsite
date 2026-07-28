@@ -23,6 +23,8 @@ export function PublicShell({
           <a href="/methodology">Methodology</a>
           <a href="/faq">FAQ</a>
           <a href="/contact">Contact</a>
+          <a href="/thrift-check">Thrift Check</a>
+          <a href="/listing-template">Listing Template</a>
           <a href="/accessibility">Accessibility</a>
           <a href="/privacy">Privacy</a>
           <a href="/terms">Terms</a>

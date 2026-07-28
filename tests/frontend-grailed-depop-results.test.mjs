@@ -79,7 +79,8 @@ test("frontend uses Grailed public-index relay and parse-aware Depop reader fall
   assert.match(client, /grailedHitToRecord/);
   assert.match(client, /parseDepopReaderMarkdown/);
   assert.match(client, /marketplace === "Depop" && !listings\.length/);
-  assert.match(route, /-dsn\.algolia\.net\/1\/indexes/);
+  assert.match(route, /algolia\.net|algolianet\.com/);
+  assert.match(route, /partial:\s*true/);
   assert.match(route, /Listing_sold_production/);
   assert.match(route, /hitsPerPage:\s*24/);
   assert.doesNotMatch(route, /quickAction|BrowserRun|cloudflare:workers/);

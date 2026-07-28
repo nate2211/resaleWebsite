@@ -29,6 +29,14 @@ const questions = [
     answer: "Depop, Grailed, and Poshmark are the default sources. International Markets adds Mercari Japan, JDirectItems Auction, Rakuten, Rakuten Rakuma, Bunjang, and public-web AI Search.",
   },
   {
+    question: "How does Thrift Check estimate whether I should buy an item?",
+    answer: "Thrift Check combines a user-supplied item description, readable sold and active marketplace prices, seller fees, shipping, an optional thrift price, and optional image-quality or similarity math. It cannot confirm authenticity or guarantee a sale.",
+  },
+  {
+    question: "Why does Listing Template require the local AI models?",
+    answer: "The page uses a locally loaded image-caption model to summarize uploaded photos and a local writing model to draft editable listing fields. Marketplace price evidence remains the pricing anchor, and every generated field must be verified before publishing.",
+  },
+  {
     question: "Why are some engagement or listing-date fields unknown?",
     answer: "A field stays unknown when the public source page does not publish a readable value. ResaleMasterLab does not sign in, bypass access controls, or invent missing metrics.",
   },

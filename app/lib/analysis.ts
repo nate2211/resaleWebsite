@@ -153,8 +153,8 @@ export const MARKETPLACE_INFO: Record<
     feeSummary: "$2.95 below $15; 20% at $15+",
   },
   "Mercari Japan": {
-    color: "#ff3158", tint: "#fff0f4", home: "https://jp.mercari.com/en/",
-    search: (query) => `https://jp.mercari.com/search?keyword=${encodeURIComponent(query)}&status=on_sale`,
+    color: "#ff3158", tint: "#fff0f4", home: "https://zenmarket.jp/en/mercari.aspx",
+    search: (query) => `https://zenmarket.jp/en/search.aspx?q=${encodeURIComponent(query)}&p=1&searchMode=custom&stores=27`,
     feeSummary: "Japan source; landed-cost estimator includes shipping, FX, and customs reserve",
     sourcingOnly: true, origin: "Japan",
   },
@@ -385,7 +385,15 @@ export function inferMarketplace(url: string): Marketplace | null {
     if (host === "poshmark.com" || host.endsWith(".poshmark.com"))
       return "Poshmark";
     if (host === "jp.mercari.com") return "Mercari Japan";
-    if (host.endsWith("zenmarket.jp")) return "Rakuten";
+    if (host.endsWith("zenmarket.jp")) {
+      const parsed = new URL(url);
+      const path = parsed.pathname.toLowerCase();
+      const stores = parsed.searchParams.get("stores");
+      if (path.includes("mercari") || stores === "27") return "Mercari Japan";
+      if (path.includes("yahoo") || path.includes("auction") || stores === "28") return "JDirectItems Auction";
+      if (path.includes("rakuma") || stores === "25") return "Rakuten Rakuma";
+      return "Rakuten";
+    }
     if (host.endsWith("globalbunjang.com")) return "Bunjang";
     if (host.endsWith("superbuy.com")) return "Goofish";
   } catch {

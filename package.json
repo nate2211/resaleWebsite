@@ -1,6 +1,6 @@
 {
   "name": "resalemasterlab",
-  "version": "1.0.4",
+  "version": "1.1.0",
   "private": true,
   "engines": {
     "node": ">=22.13.0"
@@ -13,7 +13,7 @@
     "build:windows": "node scripts/validate-vinext-entry.mjs && vinext build && node scripts/prepare-static-build.mjs",
     "start": "vinext start",
     "start:windows": "vinext start",
-    "test": "node --test tests/frontend-*.test.mjs tests/engagement-fixtures.test.mjs tests/watch-monitor.test.mjs tests/vinext-entry-validation.test.mjs tests/vinext-root-routing.test.mjs",
+    "test": "node --test tests/frontend-*.test.mjs tests/production-tools-v13.test.mjs tests/engagement-fixtures.test.mjs tests/watch-monitor.test.mjs tests/vinext-entry-validation.test.mjs tests/vinext-root-routing.test.mjs",
     "test:full": "npm run lint && npm run build:verified && npm test",
     "validate:artifact": "node scripts/validate-vinext-build.mjs",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
@@ -56,5 +56,5 @@
     "wrangler": "4.92.0"
   },
   "type": "module",
-  "description": "ResaleMasterLab marketplace research, listing monitoring, and local AI analysis."
+  "description": "ResaleMasterLab production resale research, Thrift Check, and private browser AI listing-template tools."
 }

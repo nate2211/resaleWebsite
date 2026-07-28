@@ -2,6 +2,7 @@ import {
   extractMarketplaceEngagement,
   marketplaceFromUrl,
   type EngagementMarketplace,
+  type EngagementReport,
 } from "../../lib/engagement";
 
 const ALLOWED_HOSTS = new Set([
@@ -11,6 +12,34 @@ const ALLOWED_HOSTS = new Set([
 ]);
 const MAX_HTML_LENGTH = 5_000_000;
 const cache = new Map<string, { until: number; value: unknown }>();
+
+function unavailableReport(
+  marketplace: EngagementMarketplace,
+  url: string,
+  reason: string,
+  upstreamStatus?: number,
+): EngagementReport & { available: false; upstreamStatus?: number } {
+  return {
+    marketplace,
+    url,
+    metrics: {},
+    seller: {},
+    popularityScore: 0,
+    demandLevel: "unknown",
+    confidence: 0,
+    completeness: 0,
+    scoreDrivers: [],
+    caveats: [
+      reason,
+      "Missing marketplace engagement values are unknown, not zero.",
+    ],
+    evidence: [],
+    readMethods: ["public listing request unavailable"],
+    inspectedAt: new Date().toISOString(),
+    available: false,
+    ...(upstreamStatus ? { upstreamStatus } : {}),
+  };
+}
 
 function reply(value: unknown, status = 200) {
   return Response.json(value, {
@@ -104,14 +133,17 @@ export async function POST(request: Request) {
   try {
     const { response, finalUrl, body: html } = await fetchWithSafeRedirects(validated.url, validated.marketplace);
     if (!response.ok) {
-      return reply({
-        error: response.status === 403 || response.status === 429
-          ? "The marketplace did not expose public engagement metadata right now. ResaleMasterLab does not log in or bypass anti-bot controls."
-          : `The marketplace returned HTTP ${response.status}.`,
-        status: response.status,
-        marketplace: validated.marketplace,
-        finalUrl: finalUrl.toString(),
-      }, 422);
+      const reason = response.status === 403 || response.status === 429
+        ? "The marketplace did not expose readable public engagement metadata right now."
+        : `The marketplace returned HTTP ${response.status} while engagement data was requested.`;
+      const value = unavailableReport(
+        validated.marketplace,
+        finalUrl.toString(),
+        reason,
+        response.status,
+      );
+      cache.set(cacheKey, { until: Date.now() + 300_000, value });
+      return reply(value);
     }
     const report = extractMarketplaceEngagement(html, finalUrl.toString(), validated.marketplace);
     const value = {
@@ -122,8 +154,10 @@ export async function POST(request: Request) {
     return reply(value);
   } catch (error) {
     const message = error instanceof Error && error.name === "AbortError"
-      ? "The marketplace took too long to respond."
-      : error instanceof Error ? error.message : "Engagement inspection failed.";
-    return reply({ error: message, marketplace: validated.marketplace }, 422);
+      ? "The marketplace took too long to expose public engagement metadata."
+      : error instanceof Error ? error.message : "Public engagement inspection was unavailable.";
+    const value = unavailableReport(validated.marketplace, validated.url.toString(), message);
+    cache.set(cacheKey, { until: Date.now() + 180_000, value });
+    return reply(value);
   }
 }

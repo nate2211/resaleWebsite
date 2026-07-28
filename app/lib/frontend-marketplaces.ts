@@ -169,11 +169,9 @@ export function frontendMarketplaceUrls(
     : `https://www.grailed.com/shop?query=${q}&page=${p}`];
   if (marketplace === "Poshmark") return [`https://poshmark.com/search?query=${q}&type=listings&src=ac&page=${p}`];
   if (marketplace === "Mercari Japan") {
-    const status = mode === "sold" ? "sold_out" : "on_sale";
     return [
-      `https://jp.mercari.com/search?keyword=${q}&status=${status}&page=${p}`,
-      `https://jp.mercari.com/en/search?keyword=${q}&status=${status}&page=${p}`,
-      `https://jp.mercari.com/search?keyword=${q}&status=${status}`,
+      `https://zenmarket.jp/en/search.aspx?q=${q}&p=${p}&searchMode=custom&stores=27`,
+      `https://zenmarket.jp/en/mercari.aspx?q=${q}&p=${p}`,
     ];
   }
   if (marketplace === "JDirectItems Auction") return [
@@ -346,7 +344,16 @@ async function frontendGrailedAlgoliaFetch(
       }),
     });
     const text = (await response.text()).slice(0, MAX_RESPONSE_CHARS);
-    if (!response.ok) throw new Error(`Grailed public index relay HTTP ${response.status}`);
+    if (!response.ok) {
+      return {
+        ok: false,
+        status: response.status,
+        url: `https://www.grailed.com/${mode === "sold" ? "sold" : "shop"}?query=${encodeURIComponent(query)}&page=${page + 1}`,
+        contentType: response.headers.get("content-type") || "application/json",
+        text: JSON.stringify({ hits: [], page, nbHits: 0, partial: true }),
+        transport: "grailed-algolia",
+      };
+    }
     const upstreamStatus = Number(response.headers.get("x-rml-upstream-status") || "200") || 0;
     return {
       ok: upstreamStatus >= 200 && upstreamStatus < 300,
@@ -409,9 +416,10 @@ function jinaApiKey() {
 }
 
 async function readerFetchText(url: string, signal?: AbortSignal): Promise<TextResponse> {
+  const key = jinaApiKey();
+  if (!key) throw new Error("Readable-page fallback is disabled until a Jina API key is configured.");
   const merged = mergeAbortSignals(signal, READER_TIMEOUT_MS);
   const readerUrl = `https://r.jina.ai/${url}`;
-  const key = jinaApiKey();
   try {
     const response = await fetch(readerUrl, {
       method: "GET",
@@ -440,7 +448,11 @@ async function readerFetchText(url: string, signal?: AbortSignal): Promise<TextR
   }
 }
 
-async function fetchReadableText(url: string, signal?: AbortSignal): Promise<TextResponse> {
+async function fetchReadableText(
+  url: string,
+  signal?: AbortSignal,
+  options: { allowReader?: boolean } = {},
+): Promise<TextResponse> {
   const failures: string[] = [];
   const bridgeReady = extensionBridgeAvailable();
 
@@ -478,12 +490,14 @@ async function fetchReadableText(url: string, signal?: AbortSignal): Promise<Tex
     }
   }
 
-  try {
-    const reader = await readerFetchText(url, signal);
-    if (reader.ok && reader.text.trim()) return reader;
-    failures.push(`reader HTTP ${reader.status}`);
-  } catch (error) {
-    failures.push(error instanceof Error ? error.message : "reader unavailable");
+  if (options.allowReader !== false && jinaApiKey()) {
+    try {
+      const reader = await readerFetchText(url, signal);
+      if (reader.ok && reader.text.trim()) return reader;
+      failures.push(`reader HTTP ${reader.status}`);
+    } catch (error) {
+      failures.push(error instanceof Error ? error.message : "reader unavailable");
+    }
   }
 
   throw new Error(failures.filter(Boolean).join("; ") || "No marketplace-results transport succeeded.");
@@ -558,6 +572,8 @@ function marketplaceRecordWithUrl(
   if (marketplace === "Grailed") {
     const slug = recordText(enriched, ["slug"]);
     enriched.url = `/listings/${id}${slug ? `-${slug.replace(new RegExp(`^${id}-?`), "")}` : ""}`;
+  } else if (marketplace === "Mercari Japan" && (storeId === "27" || /mercari/i.test(storeName))) {
+    enriched.url = `https://zenmarket.jp/en/mercari.aspx?itemCode=${encodeURIComponent(id)}`;
   } else if (marketplace === "Rakuten" && (storeId === "0" || /rakuten/i.test(storeName))) {
     enriched.url = `https://zenmarket.jp/en/rakutenproduct.aspx?itemCode=${encodeURIComponent(id)}`;
   } else if (marketplace === "JDirectItems Auction" && (storeId === "28" || /auction|yahoo|jdirect/i.test(storeName))) {
@@ -588,8 +604,12 @@ function canonicalListingUrl(value: string, marketplace: Marketplace, base: stri
     } else if (marketplace === "Poshmark") {
       if (!hostMatches("poshmark.com") || !/\/listing\//i.test(path)) return "";
     } else if (marketplace === "Mercari Japan") {
-      if (host !== "jp.mercari.com" || !/(?:\/en)?\/item\/m\d+/i.test(path)) return "";
-      parsed.search = "";
+      const directMercari = host === "jp.mercari.com" && /(?:\/en)?\/item\/m\d+/i.test(path);
+      const zenMarketMercari = hostMatches("zenmarket.jp")
+        && /mercari(?:product)?\.aspx/i.test(path)
+        && [...parsed.searchParams.keys()].some((key) => /item|code|id/i.test(key));
+      if (!directMercari && !zenMarketMercari) return "";
+      if (directMercari) parsed.search = "";
     } else if (marketplace === "Rakuten") {
       const valid = (hostMatches("zenmarket.jp") && /rakutenproduct\.aspx/i.test(path))
         || (host === "item.rakuten.co.jp" && path.split("/").filter(Boolean).length >= 2);
@@ -738,7 +758,7 @@ function parseJsonScripts(document: Document, marketplace: Marketplace, base: st
     if (!content || content.length > 2_000_000) continue;
     const type = script.getAttribute("type") || "";
     if (!/json/i.test(type) && script.id !== "__NEXT_DATA__"
-      && !/(?:__next_f|__INITIAL_STATE__|__APOLLO_STATE__|itemListElement|\/products\/|\/listings\/|\/listing\/|item\.rakuten)/i.test(content)) continue;
+      && !/(?:__next_f|__INITIAL_STATE__|__APOLLO_STATE__|itemListElement|itemCode|mercari|\/products\/|\/listings\/|\/listing\/|item\.rakuten)/i.test(content)) continue;
     for (const payload of jsonPayloadsFromScript(content)) {
       output.push(...recordsFromJson(payload, marketplace, base));
     }
@@ -750,7 +770,7 @@ function marketplaceHrefPattern(marketplace: Marketplace) {
   if (marketplace === "Depop") return /\/products\//i;
   if (marketplace === "Grailed") return /\/listings\//i;
   if (marketplace === "Poshmark") return /\/listing\//i;
-  if (marketplace === "Mercari Japan") return /\/item\//i;
+  if (marketplace === "Mercari Japan") return /(?:\/item\/|mercari(?:product)?\.aspx)/i;
   if (marketplace === "JDirectItems Auction") return /(?:auction|yahoo|product\.aspx|auctionproduct\.aspx)/i;
   if (marketplace === "Rakuten") return /(?:rakutenproduct\.aspx|item\.rakuten\.co\.jp)/i;
   if (marketplace === "Rakuten Rakuma") return /(?:rakuma|fril\.jp\/shop|fril\.jp\/item)/i;
@@ -822,7 +842,7 @@ function embeddedListingPathPattern(marketplace: Marketplace) {
   if (marketplace === "Depop") return /(?:https?:\/\/[^"'\s<>]+)?\/products\/[a-z0-9_-]+\/?/gi;
   if (marketplace === "Grailed") return /(?:https?:\/\/[^"'\s<>]+)?\/listings\/\d+[^"'\s<>]*/gi;
   if (marketplace === "Poshmark") return /(?:https?:\/\/[^"'\s<>]+)?\/listing\/[a-z0-9_-]+[^"'\s<>]*/gi;
-  if (marketplace === "Mercari Japan") return /(?:https?:\/\/jp\.mercari\.com)?\/(?:en\/)?item\/m\d+/gi;
+  if (marketplace === "Mercari Japan") return /(?:https?:\/\/(?:jp\.mercari\.com\/(?:en\/)?item\/m\d+|zenmarket\.jp\/[^"\'\s<>]*mercari(?:product)?\.aspx\?[^"\'\s<>]+))/gi;
   if (marketplace === "Rakuten") return /https?:\/\/(?:item\.rakuten\.co\.jp\/[^"'\s<>]+|zenmarket\.jp\/[^"'\s<>]*rakutenproduct\.aspx\?[^"'\s<>]+)/gi;
   if (marketplace === "JDirectItems Auction") return /https?:\/\/(?:auctions\.yahoo\.co\.jp\/auction\/[^"'\s<>]+|zenmarket\.jp\/[^"'\s<>]*(?:auction|yahoo)[^"'\s<>]*\.aspx\?[^"'\s<>]+)/gi;
   if (marketplace === "Rakuten Rakuma") return /https?:\/\/(?:item\.fril\.jp\/[^"'\s<>]+|fril\.jp\/(?:shop|item)\/[^"'\s<>]+|zenmarket\.jp\/[^"'\s<>]*rakuma[^"'\s<>]*\.aspx\?[^"'\s<>]+)/gi;
@@ -1071,7 +1091,7 @@ async function hydrateListingPages(
       const listing = candidates[index];
       const url = String(listing.url || "");
       try {
-        const response = await fetchReadableText(url, signal);
+        const response = await fetchReadableText(url, signal, { allowReader: false });
         transports.add(response.transport);
         const parsed = dedupeListings(parseResponse(response, marketplace), 12);
         const detail = parsed.find((item) => String(item.url || "") === url) || parsed[0];
@@ -1112,7 +1132,7 @@ export async function searchMarketplaceFrontend(input: {
     // In that case read the same official URL through the public readable-page
     // representation, whose numbered cards include product links, prices, sizes
     // and first-party media-photos.depop.com images.
-    if (marketplace === "Depop" && !listings.length && response.transport !== "reader") {
+    if (marketplace === "Depop" && !listings.length && response.transport !== "reader" && jinaApiKey()) {
       try {
         const reader = await readerFetchText(url, signal);
         responses.push(reader);
@@ -1212,6 +1232,7 @@ function supportedHost(url: string) {
 
 async function searchJina(query: string, signal?: AbortSignal) {
   const key = jinaApiKey();
+  if (!key) return [];
   const merged = mergeAbortSignals(signal, READER_TIMEOUT_MS);
   try {
     const response = await fetch(`https://s.jina.ai/?q=${encodeURIComponent(query)}`, {
@@ -1322,7 +1343,7 @@ export async function searchAiWebFrontend(input: {
     let image = item.image;
     let price = priceFromPublicText(`${title} ${description}`).amount;
     try {
-      const response = await fetchReadableText(item.url, input.signal);
+      const response = await fetchReadableText(item.url, input.signal, { allowReader: false });
       const sourceName = outsideSource(item.url);
       const generic = parseHtml(response.text, "Depop", response.url)[0];
       title = String(generic?.title || title);

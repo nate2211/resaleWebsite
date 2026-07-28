@@ -24,6 +24,14 @@ export default function Page() {
   <p>Engagement analysis uses only public metrics that a marketplace exposes. Authenticity research compares listing details with public retailer and release references, but it does not certify an item as authentic.</p>
 </section>
 <section>
+  <h2>Thrift Check image math</h2>
+  <p>Optional computer vision calculates exposure, contrast, sharpness, edge density, dominant color, resolution, color histograms, and perceptual hashes. When sold-item images are readable, those feature vectors can weight otherwise valid sold prices. Visual similarity does not prove that two garments are the same model or authentic.</p>
+</section>
+<section>
+  <h2>Listing Template pricing</h2>
+  <p>The listing generator uses public sold evidence first and discounted active asking prices only when sold evidence is sparse. The local writing model receives that deterministic price anchor and produces an editable draft rather than an automatic marketplace post.</p>
+</section>
+<section>
   <h2>AI boundaries</h2>
   <p>The optional browser model can interpret evidence and adjust relevance or confidence within fixed limits. It cannot create missing sold prices, engagement counts, dates, or authenticity proof.</p>
 </section>

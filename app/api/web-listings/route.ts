@@ -7,7 +7,7 @@ export async function POST() {
     listings: [],
     searches: [],
     frontendOnly: true,
-    workerRevision: "grailed-depop-results-v11",
+    workerRevision: "production-thrift-listing-v13",
   }, {
     status: 410,
     headers: { "cache-control": "no-store" },

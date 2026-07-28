@@ -174,7 +174,7 @@ function listingImageSource(listing: Listing) {
   try {
     const base = typeof window !== "undefined"
       ? window.location.origin
-      : "https://resalewebsite.unusualsuspectsclothing.workers.dev";
+      : "https://resalemasterlab.cloud-cord.com";
     const url = new URL(listing.image, base);
     const lower = `${url.hostname}${url.pathname}`.toLowerCase();
     if (/favicon|\.ico(?:$|\?)|logo|sprite|duckduckgo\.com\/ip3\//.test(lower)) {
@@ -536,6 +536,11 @@ export default function Home() {
       body: JSON.stringify(event),
     }).catch(() => undefined);
   }
+
+  useEffect(() => {
+    const requestedQuery = new URLSearchParams(window.location.search).get("q")?.trim();
+    if (requestedQuery) setQuery(requestedQuery.slice(0, 180));
+  }, []);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -1455,6 +1460,8 @@ export default function Home() {
             )}
           </button>
         ))}
+        <a className="feature-nav-link" href="/thrift-check">Thrift Check</a>
+        <a className="feature-nav-link" href="/listing-template">Listing Template</a>
         <div className="subnav-spacer" />
         <button
           type="button"
@@ -1474,6 +1481,11 @@ export default function Home() {
         <div className="product-intro-points" aria-label="Key capabilities">
           <span>Live listing search</span><span>Saved listing monitoring</span><span>Local AI analysis</span>
         </div>
+      </section>
+
+      <section className="homepage-feature-links" aria-label="ResaleMasterLab photo and listing tools">
+        <a href="/thrift-check"><span>Photo sourcing</span><strong>Thrift Check</strong><small>Take phone photos, compare sold evidence, and estimate profit before buying.</small></a>
+        <a href="/listing-template"><span>Private browser AI</span><strong>Listing Template</strong><small>Upload item photos and generate an editable title, description, fields, and evidence-bounded price.</small></a>
       </section>
 
       <section className="workspace-steps" aria-label="How ResaleMasterLab works">
@@ -1874,6 +1886,8 @@ export default function Home() {
           <a href="/methodology">Methodology</a>
           <a href="/faq">FAQ</a>
           <a href="/contact">Contact</a>
+          <a href="/thrift-check">Thrift Check</a>
+          <a href="/listing-template">Listing Template</a>
           <a href="/accessibility">Accessibility</a>
           <a href="/privacy">Privacy</a>
           <a href="/terms">Terms</a>
@@ -1997,7 +2011,7 @@ function ListingInspector({
   const soldResearchUrl =
     `https://www.grailed.com/sold?query=${encodeURIComponent(listing.title)}`;
   const mercariSoldResearchUrl =
-    `https://jp.mercari.com/en/search?keyword=${encodeURIComponent(listing.title)}&status=sold_out`;
+    `https://zenmarket.jp/en/search.aspx?q=${encodeURIComponent(listing.title)}&p=1&searchMode=custom&stores=27`;
 
   useEffect(() => {
     let active = true;
@@ -2249,7 +2263,7 @@ function ListingInspector({
       if (!response.ok || report.error) throw new Error(report.error || "Engagement research failed.");
       setEngagementReport(report);
       onEngagementReport(report);
-      if (modelReady) {
+      if (modelReady && report.completeness > 0) {
         try {
           const assessment = await onModelEngagement(listing, report);
           setModelEngagement(assessment);
@@ -2293,7 +2307,7 @@ function ListingInspector({
       if (!response.ok || report.error) throw new Error(report.error || "Authenticity research failed.");
       setAuthenticityReport(report);
       setAuthenticityState("ready");
-      if (modelReady) {
+      if (modelReady && report.completeness > 0) {
         try {
           const assessment = await onModelAuthenticity(listing, report);
           setModelAuthenticity(assessment);
@@ -5047,7 +5061,7 @@ Finish with NOTE: one short explanation. Do not return anything else.`,
         });
         setMessages((current) => [...current, {
           role: "tool",
-          content: `Tool · Sold analysis kept active and sold routes separate. It tried ${new Set(soldQueriesUsed).size} intelligent title variations across ${Math.min(6, sourceCandidates.length)} candidates on Grailed /sold and Mercari Japan status=sold_out, reading ${soldCount} unique sold cards. Grailed raw sources: ${soldPageCardCount} page-card hits and ${soldPublicSearchCount} public-search hits before deduplication.`,
+          content: `Tool · Sold analysis kept active and sold routes separate. It tried ${new Set(soldQueriesUsed).size} intelligent title variations across ${Math.min(6, sourceCandidates.length)} candidates on Grailed /sold and Mercari Japan through ZenMarket store 27, reading ${soldCount} unique sold cards. Grailed raw sources: ${soldPageCardCount} page-card hits and ${soldPublicSearchCount} public-search hits before deduplication.`,
         }]);
       } else {
         updateStep("sold", {

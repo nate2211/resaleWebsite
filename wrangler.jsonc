@@ -18,6 +18,14 @@
   },
   "vars": {
     "RML_MARKETPLACE_TRANSPORT": "official-page-source-relay",
-    "RML_GRAILED_SEARCH": "public-index"
-  }
+    "RML_GRAILED_SEARCH": "public-index",
+    "NEXT_PUBLIC_SITE_URL": "https://resalemasterlab.cloud-cord.com",
+    "RML_FEATURES": "thrift-check,listing-template,official-page-source-relay"
+  },
+  "routes": [
+    {
+      "pattern": "resalemasterlab.cloud-cord.com",
+      "custom_domain": true
+    }
+  ]
 }

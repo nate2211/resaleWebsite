@@ -5,9 +5,9 @@ const MARKET_URLS = {
   Poshmark: (query: string) =>
     `https://poshmark.com/search?query=${encodeURIComponent(query)}&type=listings&src=ac`,
   "Mercari Japan": (query: string) =>
-    `https://jp.mercari.com/en/search?keyword=${encodeURIComponent(query)}&status=on_sale`,
+    `https://zenmarket.jp/en/search.aspx?q=${encodeURIComponent(query)}&p=1&searchMode=custom&stores=27`,
   "Mercari Japan sold": (query: string) =>
-    `https://jp.mercari.com/en/search?keyword=${encodeURIComponent(query)}&status=sold_out`,
+    `https://zenmarket.jp/en/search.aspx?q=${encodeURIComponent(query)}&p=1&searchMode=custom&stores=27`,
   "JDirectItems Auction": (query: string) =>
     `https://zenmarket.jp/en/yahoo.aspx?q=${encodeURIComponent(query)}&p=1`,
   Rakuten: (query: string) =>

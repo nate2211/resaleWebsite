@@ -1,10 +1,12 @@
 import type { MetadataRoute } from "next";
 
 export default function sitemap(): MetadataRoute.Sitemap {
-  const base = process.env.NEXT_PUBLIC_SITE_URL || "https://resalewebsite.unusualsuspectsclothing.workers.dev";
-  const lastModified = new Date("2026-07-26T00:00:00Z");
+  const base = process.env.NEXT_PUBLIC_SITE_URL || "https://resalemasterlab.cloud-cord.com";
+  const lastModified = new Date("2026-07-28T00:00:00Z");
   return [
     { url: `${base}/`, lastModified, changeFrequency: "weekly", priority: 1 },
+    { url: `${base}/thrift-check`, lastModified, changeFrequency: "weekly", priority: 0.95 },
+    { url: `${base}/listing-template`, lastModified, changeFrequency: "weekly", priority: 0.9 },
     { url: `${base}/about`, lastModified, changeFrequency: "monthly", priority: 0.7 },
     { url: `${base}/methodology`, lastModified, changeFrequency: "monthly", priority: 0.8 },
     { url: `${base}/faq`, lastModified, changeFrequency: "monthly", priority: 0.7 },

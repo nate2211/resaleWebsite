@@ -1,95 +1,52 @@
-# ResaleMasterLab — Grailed + Depop Results v11
+# ResaleMasterLab production tools v13
 
-This version restores the earlier marketplace-adapter behavior: each search begins with the marketplace's normal public search URL and query parameters, then the browser parses that page source for real listing records.
+Production domain: `https://resalemasterlab.cloud-cord.com`
 
-## Marketplace request flow
+This package retains the v12 official marketplace page-source adapters, engagement fallbacks, Grailed public-index search, and ZenMarket store separation, then adds two crawlable product pages:
 
-For every official search or product URL, the browser calls:
+- `/thrift-check` — phone camera/image uploads, optional purchase price, sold/active marketplace evidence, fee-aware profit and ROI, deterministic computer-vision metrics, optional sold-image similarity, and optional local AI explanation.
+- `/listing-template` — requires the locally loaded image-caption and writing models, then generates editable brand, title, category, condition, color, material, size, description, tags, list price, and floor price fields bounded by public marketplace evidence.
 
-```text
-/api/listings?source=<encoded official marketplace URL>
-```
+## Production and SEO
 
-The route makes exactly one bounded upstream request and returns the raw HTML, JSON, React state, or text body. It does not use Browser Run, crawl search engines, parse listings on the server, run AI, or fan out to other pages.
+- Canonicals, Open Graph, Twitter cards, JSON-LD, sitemap, robots, PWA manifest, maskable icons, shortcuts, and screenshots use `resalemasterlab.cloud-cord.com`.
+- The homepage and both tool pages contain server-rendered explanatory copy and ordinary anchor links.
+- `wrangler.jsonc` configures `resalemasterlab.cloud-cord.com` as a Cloudflare Worker Custom Domain while keeping the workers.dev URL available for diagnostics.
+- Add the Search Console token through `NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION`.
 
-The frontend then parses:
+## Marketplace evidence
 
-- regular listing-card anchors and visible text;
-- JSON-LD product and `ItemList` records;
-- `__NEXT_DATA__`;
-- `__INITIAL_STATE__`, Apollo, and preloaded state;
-- React/Next Flight `self.__next_f.push(...)` records;
-- canonical/OpenGraph product metadata;
-- page-source images, prices, brands, sizes, conditions, descriptions, and item URLs.
+Marketplace search behavior remains from v12:
 
-When a search card is missing important fields, the frontend hydrates at most eight canonical product pages with three concurrent requests. Each hydration is another isolated one-page relay request, so there is no single resource-heavy Worker invocation.
+- Depop official search/brand/theme sources and canonical product-page enrichment.
+- Grailed active and sold public indexes.
+- Poshmark normal listing search.
+- ZenMarket: Mercari Japan `27`, JDirectItems `28`, Rakuten `0`, Rakuma `25`.
+- Partial failures use settled-result handling.
+- Browser Run is not configured.
 
-## Official query routes
+## Local AI
 
-- Depop: `/search/?q=...&page=...`, then brand and theme pages.
-- Grailed: `/shop?query=...&page=...` or `/sold?...`; the page's public Algolia configuration then selects `Listing_production` or `Listing_sold_production`.
-- Poshmark: `/search?query=...&type=listings&src=ac&page=...`.
-- Mercari Japan: `/search?keyword=...&status=on_sale|sold_out&page=...`.
-- JDirectItems through ZenMarket: `search.aspx?...&searchMode=custom&stores=28`.
-- Rakuten through ZenMarket: `search.aspx?...&searchMode=custom&stores=0`.
-- Rakuten Rakuma through ZenMarket: `search.aspx?...&searchMode=custom&stores=25`.
-- Bunjang: `/search?q=...&page=...`.
+The browser downloads and caches:
 
-Depop's undocumented `webapi.depop.com` search endpoints are not used. If the official HTML is only a JavaScript shell, the frontend reads the same official URL through the readable-page representation and parses its numbered, image-wrapped product cards.
+- `HuggingFaceTB/SmolLM2-135M-Instruct` for bounded writing/explanation.
+- `Xenova/vit-gpt2-image-captioning` for item-photo captions.
 
-Grailed's shell exposes a public search application ID, search key, and listing indexes. The frontend extracts those values and sends one bounded JSON search through `/api/grailed-search`; listing title, designer, price, size, image, and canonical URL are parsed in the browser.
+Thrift Check can work without AI when the user supplies a searchable item description. Listing Template intentionally requires both models.
 
-## Worker safety
-
-Revision: `grailed-depop-results-v11`
-
-- No Browser Run binding.
-- One official URL per relay request.
-- HTTPS-only marketplace allowlist.
-- At most two validated redirects.
-- 15-second upstream timeout.
-- 5.5 MB response-source limit so large Poshmark/Rakuten pages are not cut off too early.
-- Raw source is returned directly rather than JSON-encoding a multi-megabyte body.
-- Search and hydration fan-out use settled-result handling.
-
-## Local development
-
-```powershell
-npm ci
-npm run dev:windows
-```
-
-Open `http://localhost:5173`.
-
-## Optional Browser Bridge
-
-The included `browser-extension/` is only a fallback when a marketplace blocks Cloudflare egress. It fetches the same normal marketplace URL; it does not call undocumented listing APIs.
-
-## Deployment
-
-Target:
-
-```text
-https://resalewebsite.unusualsuspectsclothing.workers.dev/
-```
+## Run and deploy
 
 ```powershell
 npm ci
 npm test
+npm run seo:validate
 npm run build:windows
 npm run deploy
 npm run check:production
 ```
 
-Expected `/api/health` fields:
+Set Cloudflare Git builds to Node 22 with build command `npm run build:windows` and deploy command `npm run deploy`.
 
-```json
-{
-  "revision": "grailed-depop-results-v11",
-  "marketplaceRequests": "official-page-source-relay",
-  "grailedSearch": "public-index-relay",
-  "browserBindingAvailable": false,
-  "cloudflareMarketplaceFetches": "one-official-page-per-relay-request",
-  "grailedPublicIndexFetches": "one-bounded-json-request-per-search"
-}
-```
+## Safety and limitations
+
+Results are planning estimates. Public prices may be stale or incomplete. Image metrics measure visual/photo similarity and readability, not authenticity. Verify brand, fabric, size, measurements, condition, fees, and availability before purchasing or publishing.

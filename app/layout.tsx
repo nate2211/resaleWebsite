@@ -1,11 +1,13 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
+import { SITE_URL } from "./lib/site";
+
 const configuredSiteUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim();
-const siteUrl = configuredSiteUrl || "https://resalewebsite.unusualsuspectsclothing.workers.dev";
+const siteUrl = configuredSiteUrl || SITE_URL;
 
 export const metadata: Metadata = {
-  metadataBase: configuredSiteUrl ? new URL(configuredSiteUrl) : undefined,
+  metadataBase: new URL(siteUrl),
   title: {
     default: "ResaleMasterLab — Resale Listing Research and Monitoring",
     template: "%s | ResaleMasterLab",
@@ -15,12 +17,12 @@ export const metadata: Metadata = {
   applicationName: "ResaleMasterLab",
   keywords: [
     "resale research", "streetwear resale", "clothing resale", "Depop research",
-    "Grailed research", "Poshmark research", "sold listing analysis", "resale calculator",
+    "Grailed research", "Poshmark research", "sold listing analysis", "resale calculator", "thrift store profit calculator", "AI listing template", "resale listing generator",
   ],
   authors: [{ name: "ResaleMasterLab" }],
   creator: "ResaleMasterLab",
   publisher: "ResaleMasterLab",
-  alternates: { canonical: siteUrl },
+  alternates: { canonical: "/" },
   robots: {
     index: true,
     follow: true,
@@ -65,7 +67,7 @@ const structuredData = {
       "@id": `${siteUrl}/#organization`,
       name: "ResaleMasterLab",
       url: siteUrl,
-      logo: `${siteUrl}/icon-512.png`,
+      logo: { "@type": "ImageObject", url: `${siteUrl}/icon-512.png`, width: 512, height: 512 },
     },
     {
       "@type": "WebSite",
@@ -74,6 +76,11 @@ const structuredData = {
       name: "ResaleMasterLab",
       description: "Evidence-led resale listing research and monitoring.",
       publisher: { "@id": `${siteUrl}/#organization` },
+      potentialAction: {
+        "@type": "SearchAction",
+        target: `${siteUrl}/?q={search_term_string}`,
+        "query-input": "required name=search_term_string",
+      },
     },
     {
       "@type": "SoftwareApplication",
@@ -83,6 +90,12 @@ const structuredData = {
       url: siteUrl,
       description: "A web application for resale listing discovery, comparison, monitoring, and evidence-led analysis.",
       publisher: { "@id": `${siteUrl}/#organization` },
+      featureList: [
+        "Marketplace listing research",
+        "Sold-price and fee analysis",
+        "Thrift Check photo sourcing tool",
+        "Private browser AI listing template generator",
+      ],
     },
   ],
 };
@@ -93,9 +106,11 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
       <head>
         {/* Keep runtime assets origin-relative so localhost, LAN previews, and production all use the active host. */}
         <link rel="manifest" href="/manifest.webmanifest" />
+        <link rel="icon" href="/favicon.ico" sizes="any" />
         <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
         <link rel="icon" href="/icon-192.png" sizes="192x192" type="image/png" />
         <link rel="apple-touch-icon" href="/apple-touch-icon.png" sizes="180x180" />
+        <meta name="google-site-verification" content={process.env.NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION || ""} />
       </head>
       <body className="antialiased">
         <script
