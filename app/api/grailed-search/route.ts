@@ -1,7 +1,7 @@
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
-const WORKER_REVISION = "market-search-depop-tab-capture-production-v19";
+const WORKER_REVISION = "market-search-frontend-api-depop-recovery-v20";
 const TOTAL_TIMEOUT_MS = 11_000;
 const PER_HOST_TIMEOUT_MS = 3_500;
 const MAX_RESPONSE_BYTES = 2_000_000;

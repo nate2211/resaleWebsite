@@ -1,6 +1,6 @@
 {
   "name": "resalemasterlab",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "private": true,
   "engines": {
     "node": ">=22.13.0"
@@ -56,5 +56,5 @@
     "wrangler": "4.92.0"
   },
   "type": "module",
-  "description": "ResaleMasterLab with Browser Bridge 3.0 interactive Depop tab capture and no Depop cloud-fetch fallback."
+  "description": "ResaleMasterLab with first-party frontend API Depop search, readable-page recovery, indexed product fallbacks, and no browser extension."
 }

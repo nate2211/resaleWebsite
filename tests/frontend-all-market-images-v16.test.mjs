@@ -27,17 +27,17 @@ test("all-market mode is bounded and does not multiply query variations", async 
   assert.match(page, /allMarketsMode \? \[literalQuery\]/);
   assert.match(page, /scanMode: allMarketsMode \? "all-markets" : "standard"/);
   assert.match(client, /MARKETPLACE_RELAY_CONCURRENCY = 3/);
-  assert.match(client, /maxCandidates: marketplace === "Depop" \? 0 : \(allMarketsMode \? 1 : 4\)/);
+  assert.match(client, /maxCandidates: allMarketsMode \? 1 : 4/);
   assert.match(client, /maxWorkers: allMarketsMode \? 1 : 3/);
 });
 
-test("marketplace relay permits supported sources but blocks Depop cloud egress", async () => {
+test("marketplace relay permits supported sources including Depop", async () => {
   const route = await read("app/api/listings/route.ts");
   for (const host of ["grailed.com", "poshmark.com", "zenmarket.jp", "rakuten.co.jp", "auctions.yahoo.co.jp", "fril.jp", "globalbunjang.com", "superbuy.com", "goofish.com", "2.taobao.com"]) {
     assert.match(route, new RegExp(host.replaceAll(".", "\\.")));
   }
-  assert.match(route, /Depop is browser-tab-only/);
-  assert.doesNotMatch(route, /^\s*"depop\.com",/m);
+  assert.match(route, /^\s*"depop\.com",/m);
+  assert.match(route, /relayDepop/);
 });
 
 test("Grailed nested cover photos produce an analysis-ready image", async (t) => {

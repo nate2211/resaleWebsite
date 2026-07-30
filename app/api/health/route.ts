@@ -3,17 +3,17 @@ export const runtime = "edge";
 export async function GET() {
   return Response.json({
     ok: true,
-    revision: "market-search-depop-tab-capture-production-v19",
-    marketplaceRequests: "official-page-source-relay",
+    revision: "market-search-frontend-api-depop-recovery-v20",
+    marketplaceRequests: "frontend-api-page-source-recovery",
     grailedSearch: "public-index-relay",
     browserBindingAvailable: false,
-    cloudflareMarketplaceFetches: "one-official-page-per-relay-request",
+    cloudflareMarketplaceFetches: "official-page-then-depop-readable-indexed-recovery",
     grailedPublicIndexFetches: "one-bounded-json-request-per-search",
     productionDomain: "resalemasterlab.cloud-cord.com",
     navigation: "complete-sticky-responsive-menu",
     marketplaceBatchSize: { standard: 3, allMarkets: 2 },
     marketplaceRelayConcurrency: 3,
-    depopDiscovery: "official-search-brand-theme-and-product-page-sources",
+    depopDiscovery: "frontend-api-search-brand-theme-reader-index-and-product-page-sources",
     mercariJapanDiscovery: "zenmarket-mercari-store-27-catalog-and-page-sources",
     zenMarketDiscovery: {
       mercariJapan: "store-27-catalog-plus-mercari-and-cross-site-pages",

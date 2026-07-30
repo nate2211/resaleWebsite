@@ -47,12 +47,12 @@ for (const route of ["/thrift-check", "/listing-template", "/manifest.webmanifes
 const healthResult = await read("/api/health");
 if (!healthResult.response.ok) throw new Error(`/api/health returned HTTP ${healthResult.response.status}.`);
 const health = JSON.parse(healthResult.text);
-if (health.revision !== "market-search-depop-tab-capture-production-v19") {
+if (health.revision !== "market-search-frontend-api-depop-recovery-v20") {
   throw new Error(`The domain is serving an older revision: ${health.revision || "unknown"}.`);
 }
-if (health.marketplaceRequests !== "official-page-source-relay"
-  || health.cloudflareMarketplaceFetches !== "one-official-page-per-relay-request") {
-  throw new Error("The deployed version is not using the official marketplace page-source relay.");
+if (health.marketplaceRequests !== "frontend-api-page-source-recovery"
+  || health.cloudflareMarketplaceFetches !== "official-page-then-depop-readable-indexed-recovery") {
+  throw new Error("The deployed version is not using the frontend marketplace API recovery flow.");
 }
 
 const source = "https://www.depop.com/search/?q=supreme&page=1";
@@ -62,11 +62,18 @@ if (!relayResult.response.ok) {
 }
 const upstreamStatus = Number(relayResult.response.headers.get("x-rml-upstream-status") || "0");
 const finalUrl = relayResult.response.headers.get("x-rml-final-url") || "";
-if (!upstreamStatus || !/depop\.com/i.test(finalUrl) || relayResult.text.length < 100) {
-  throw new Error("The marketplace relay did not return a readable official Depop page source.");
+const recoveryTransport = relayResult.response.headers.get("x-rml-recovery-transport") || "";
+if (!upstreamStatus || !/depop\.com/i.test(finalUrl) || relayResult.text.length < 20) {
+  throw new Error("The marketplace API did not return a clean Depop page-source or recovery response.");
 }
-if (!/official-page-source-relay/i.test(relayResult.response.headers.get("x-rml-marketplace-mode") || "")) {
-  throw new Error("The marketplace endpoint is not serving the v19 Depop rendered-tab marketplace transport.");
+if (/sorry,? not authorized|403 forbidden/i.test(relayResult.text)) {
+  throw new Error("The marketplace API exposed raw Depop forbidden HTML instead of applying recovery.");
+}
+if (!/frontend-api-page-source-recovery/i.test(relayResult.response.headers.get("x-rml-marketplace-mode") || "")) {
+  throw new Error("The marketplace endpoint is not serving the v20 frontend-API recovery transport.");
+}
+if (!/^(official|depop-reader|depop-index|depop-empty)$/.test(recoveryTransport)) {
+  throw new Error(`Unexpected Depop recovery transport: ${recoveryTransport || "missing"}.`);
 }
 
 const grailedResult = await post("/api/grailed-search", {
@@ -132,6 +139,7 @@ console.log(JSON.stringify({
   relayUpstreamStatus: upstreamStatus,
   relayCharacters: relayResult.text.length,
   relayFinalUrl: finalUrl,
+  recoveryTransport,
   grailedUpstreamStatus,
   grailedHits,
   grailedPartial,

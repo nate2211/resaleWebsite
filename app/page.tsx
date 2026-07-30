@@ -194,10 +194,10 @@ function requestErrorMessage(error: unknown, fallback: string) {
   if (error instanceof DOMException && error.name === "AbortError") return "Request cancelled.";
   const message = error instanceof Error ? error.message.trim() : "";
   if (/sorry,? not authorized|403 forbidden|you (?:have been|were) blocked/i.test(message)) {
-    return "The marketplace blocked the cloud request. Use Browser Bridge, complete any verification tab it opens, and retry.";
+    return "The marketplace blocked its first public-page request. ResaleMasterLab is continuing through the frontend API readable-page and indexed fallbacks.";
   }
   if (/"hits"\s*:\s*\[\]|Grailed's public listing index was temporarily unavailable/i.test(message)) {
-    return "Grailed's public index did not respond, so ResaleMasterLab is continuing with official page capture through Browser Bridge.";
+    return "Grailed's public index did not respond, so ResaleMasterLab is continuing with official page-source fallbacks.";
   }
   return message || fallback;
 }
@@ -2953,10 +2953,6 @@ function BrowseView({
   );
   const [webSearchListings, setWebSearchListings] = useState<Listing[]>([]);
   const [marketSelectionMessage, setMarketSelectionMessage] = useState("");
-  const [browserBridge, setBrowserBridge] = useState<{ connected: boolean; version: string }>({
-    connected: false,
-    version: "",
-  });
   const webSearchAbortController = useRef<AbortController | null>(null);
   const requestInFlight = useRef(false);
   const requestGeneration = useRef(0);
@@ -3007,23 +3003,6 @@ function BrowseView({
     category, marketFilter, brandFilter, sizeFilter, conditionFilter, articleFilter,
     minimumPrice, maximumPrice, listedAfter, listedBefore, liveSort, aiWebSearchSelected,
   ]);
-  useEffect(() => {
-    const detect = () => setBrowserBridge({
-      connected: document.documentElement.dataset.rmlBridge === "ready",
-      version: document.documentElement.dataset.rmlBridgeVersion || "",
-    });
-    const onReady = (event: MessageEvent) => {
-      if (event.source !== window || event.data?.type !== "RML_BRIDGE_READY") return;
-      setBrowserBridge({ connected: true, version: String(event.data.version || "") });
-    };
-    detect();
-    window.addEventListener("message", onReady);
-    const timer = window.setTimeout(detect, 700);
-    return () => {
-      window.clearTimeout(timer);
-      window.removeEventListener("message", onReady);
-    };
-  }, []);
   useEffect(() => {
     liveStateRef.current = liveState;
   }, [liveState]);
@@ -3247,7 +3226,7 @@ function BrowseView({
       searchTerm,
       message: listings.length
         ? `${planningNote} ${value.discoveryMode} found ${listings.length} listing page${listings.length === 1 ? "" : "s"} from ${sourceCount} outside source${sourceCount === 1 ? "" : "s"}.`
-        : `The browser found ${value.discoveredCount ?? 0} candidate pages across ${(value.targetedSecondhandSources ?? ["eBay", "Mercari US", "Facebook Marketplace"]).join(", ")}, but none exposed readable listing data. Install the included browser bridge when those sites block cross-origin reads.`,
+        : `The browser found ${value.discoveredCount ?? 0} candidate pages across ${(value.targetedSecondhandSources ?? ["eBay", "Mercari US", "Facebook Marketplace"]).join(", ")}, but none exposed readable listing data. The frontend marketplace API will use its bounded public-page fallbacks when those sites block direct cross-origin reads.`,
     };
   }
 
@@ -3697,21 +3676,6 @@ function BrowseView({
         </button>
       </section>
 
-      <section className={`browser-bridge-container ${browserBridge.connected ? "connected" : "missing"}`} aria-live="polite">
-        <div>
-          <span className="browser-bridge-dot" aria-hidden="true" />
-          <strong>{browserBridge.connected ? "Browser Bridge connected" : "Browser Bridge not detected"}</strong>
-          <small>
-            {browserBridge.connected
-              ? `Version ${browserBridge.version || "3.x"} can capture Depop and Grailed through your normal browser session.`
-              : "Load the included browser-extension folder as an unpacked Chrome/Edge extension, then reload this page."}
-          </small>
-        </div>
-        <span className="browser-bridge-mode">
-          {browserBridge.connected ? "Depop rendered-tab capture" : "Depop extension required"}
-        </span>
-      </section>
-
       <section className="browse-search panel">
         <div>
           <span aria-hidden="true">⌕</span>
@@ -3863,7 +3827,7 @@ function BrowseView({
                     Include
                   </label>
                 </div>
-                <p>Search public secondhand listings through the bounded marketplace-results relay. Parsing and comparisons stay in your browser; the included Browser Bridge remains an optional fallback.</p>
+                <p>Search public secondhand listings through the bounded frontend marketplace API. Depop uses exact search, brand/theme, readable-page, indexed product-link, and bounded product-page recovery without a browser extension.</p>
                 <label className="ai-market-search-field">
                   <span aria-hidden="true">⌕</span>
                   <input

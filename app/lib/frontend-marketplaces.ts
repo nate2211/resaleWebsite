@@ -32,7 +32,6 @@ export type FrontendMarketplaceResult = {
     transport: string[];
     attemptedUrls: string[];
     readableResponses: number;
-    extensionBridgeAvailable: boolean;
     readerFallbackUsed: boolean;
     hydratedListings: number;
   };
@@ -52,26 +51,10 @@ type TextResponse = {
   url: string;
   contentType: string;
   text: string;
-  transport: "frontend-api" | "grailed-algolia" | "direct" | "extension" | "reader";
-  requiresUserAction?: boolean;
-  message?: string;
-};
-
-type BridgeResponse = {
-  ok?: boolean;
-  status?: number;
-  url?: string;
-  contentType?: string;
-  body?: string;
-  error?: string;
-  challenge?: boolean;
-  requiresUserAction?: boolean;
-  transport?: string;
-  recordCount?: number;
+  transport: "frontend-api" | "grailed-algolia" | "direct" | "reader";
 };
 
 const MAX_RESPONSE_CHARS = 5_500_000;
-const BRIDGE_TIMEOUT_MS = 55_000;
 const DIRECT_TIMEOUT_MS = 12_000;
 const READER_TIMEOUT_MS = 20_000;
 const JINA_KEY_STORAGE = "rml:jina-reader-key";
@@ -269,6 +252,7 @@ async function frontendApiFetchText(url: string, signal?: AbortSignal): Promise<
       throw new Error(message);
     }
     const upstreamStatus = Number(response.headers.get("x-rml-upstream-status") || "200") || 0;
+    const recoveryTransport = response.headers.get("x-rml-recovery-transport") || "official";
     return {
       ok: upstreamStatus >= 200 && upstreamStatus < 400,
       status: upstreamStatus,
@@ -276,7 +260,7 @@ async function frontendApiFetchText(url: string, signal?: AbortSignal): Promise<
       contentType: response.headers.get("x-rml-upstream-content-type")
         || response.headers.get("content-type") || "",
       text,
-      transport: "frontend-api",
+      transport: recoveryTransport === "depop-reader" ? "reader" : "frontend-api",
     };
     } finally {
       merged.cleanup();
@@ -310,61 +294,6 @@ async function directFetchText(url: string, signal?: AbortSignal): Promise<TextR
   } finally {
     merged.cleanup();
   }
-}
-
-function extensionBridgeAvailable() {
-  return typeof window !== "undefined" && (
-    typeof (window as Window & { __RML_EXTENSION_FETCH__?: unknown }).__RML_EXTENSION_FETCH__ === "function" ||
-    document.documentElement.dataset.rmlBridge === "ready"
-  );
-}
-
-type PendingBridgeRequest = {
-  resolve: (value: TextResponse) => void;
-  reject: (reason: Error | DOMException) => void;
-  url: string;
-  timer: number;
-  signal?: AbortSignal;
-  onAbort?: () => void;
-};
-
-const pendingBridgeRequests = new Map<string, PendingBridgeRequest>();
-let bridgeResponseListenerInstalled = false;
-
-function settleBridgeRequest(id: string, callback: (pending: PendingBridgeRequest) => void) {
-  const pending = pendingBridgeRequests.get(id);
-  if (!pending) return;
-  pendingBridgeRequests.delete(id);
-  window.clearTimeout(pending.timer);
-  if (pending.onAbort) pending.signal?.removeEventListener("abort", pending.onAbort);
-  callback(pending);
-}
-
-function ensureBridgeResponseListener() {
-  if (bridgeResponseListenerInstalled || typeof window === "undefined") return;
-  bridgeResponseListenerInstalled = true;
-  window.addEventListener("message", (event: MessageEvent) => {
-    if (event.source !== window) return;
-    const data = event.data as { type?: string; id?: string; source?: string; response?: BridgeResponse };
-    if (data?.type !== "RML_FETCH_RESPONSE" || typeof data.id !== "string") return;
-    const value = data.response;
-    settleBridgeRequest(data.id, (pending) => {
-      if (!value || (value.error && !value.body && !value.requiresUserAction)) {
-        pending.reject(new Error(value?.error || "Browser bridge request failed."));
-        return;
-      }
-      pending.resolve({
-        ok: Boolean(value.ok),
-        status: Number(value.status) || 0,
-        url: value.url || pending.url,
-        contentType: value.contentType || "",
-        text: (value.body || "").slice(0, MAX_RESPONSE_CHARS),
-        transport: "extension",
-        requiresUserAction: Boolean(value.requiresUserAction),
-        message: value.error || "",
-      });
-    });
-  });
 }
 
 async function frontendGrailedAlgoliaFetch(
@@ -410,47 +339,6 @@ async function frontendGrailedAlgoliaFetch(
   } finally {
     merged.cleanup();
   }
-}
-
-async function extensionFetchText(url: string, signal?: AbortSignal): Promise<TextResponse> {
-  const injected = (window as Window & {
-    __RML_EXTENSION_FETCH__?: (input: { url: string }) => Promise<BridgeResponse>;
-  }).__RML_EXTENSION_FETCH__;
-  if (typeof injected === "function") {
-    const value = await injected({ url });
-    if (!value || (value.error && !value.body && !value.requiresUserAction)) throw new Error(value?.error || "Browser bridge request failed.");
-    return {
-      ok: Boolean(value.ok),
-      status: Number(value.status) || 0,
-      url: value.url || url,
-      contentType: value.contentType || "",
-      text: (value.body || "").slice(0, MAX_RESPONSE_CHARS),
-      transport: "extension",
-      requiresUserAction: Boolean(value.requiresUserAction),
-      message: value.error || "",
-    };
-  }
-
-  if (!extensionBridgeAvailable()) {
-    throw new Error("Browser bridge is not installed or not ready.");
-  }
-
-  ensureBridgeResponseListener();
-  const id = `rml-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  return await new Promise<TextResponse>((resolve, reject) => {
-    const timer = window.setTimeout(() => {
-      settleBridgeRequest(id, (pending) => pending.reject(new Error("Browser bridge request timed out.")));
-    }, BRIDGE_TIMEOUT_MS);
-    const pending: PendingBridgeRequest = { resolve, reject, url, timer, signal };
-    if (signal) {
-      pending.onAbort = () => {
-        settleBridgeRequest(id, (request) => request.reject(new DOMException("Request cancelled.", "AbortError")));
-      };
-      signal.addEventListener("abort", pending.onAbort, { once: true });
-    }
-    pendingBridgeRequests.set(id, pending);
-    window.postMessage({ type: "RML_FETCH_REQUEST", id, request: { url } }, "*");
-  });
 }
 
 function jinaApiKey() {
@@ -500,60 +388,21 @@ async function fetchReadableText(
   options: { allowReader?: boolean } = {},
 ): Promise<TextResponse> {
   const failures: string[] = [];
-  const bridgeReady = extensionBridgeAvailable();
-  const hostname = (() => {
-    try { return new URL(url).hostname.toLowerCase(); } catch { return ""; }
-  })();
-  const isDepop = hostnameMatches(hostname, "depop.com");
-  const preferBridge = bridgeReady && ["grailed.com", "poshmark.com"]
-    .some((domain) => hostnameMatches(hostname, domain));
 
-  const tryBridge = async () => {
-    const bridged = await extensionFetchText(url, signal);
-    if (bridged.requiresUserAction) {
-      throw new Error(bridged.message || "Complete the marketplace verification tab, then retry the search.");
-    }
-    if (bridged.ok && bridged.text.trim()) return bridged;
-    throw new Error(bridged.message || `Browser Bridge HTTP ${bridged.status}`);
-  };
-
-  // Depop is browser-tab-only. Do not fall through to the Cloudflare relay or
-  // an extension background fetch: those are the paths that returned the raw
-  // "Sorry, not authorized" page. The bridge opens the normal Depop URL in a
-  // visible tab and captures the rendered listing cards after hydration.
-  if (isDepop) {
-    if (!bridgeReady) {
-      throw new Error("Depop requires the included Browser Bridge. Load the extension, refresh ResaleMasterLab, and search again.");
-    }
-    return await tryBridge();
-  }
-
-  if (preferBridge) {
-    try {
-      return await tryBridge();
-    } catch (error) {
-      failures.push(error instanceof Error ? error.message : "Browser Bridge unavailable");
-    }
-  }
-
-  // Non-Depop marketplaces retain the bounded same-origin page-source relay.
+  // The same-origin frontend API is the primary transport for every supported
+  // marketplace, including Depop. The API performs the official-page request
+  // and applies its own Depop readable/indexed fallbacks when the origin returns
+  // a challenge page, so no browser extension or background tab is required.
   try {
     const relayed = await frontendApiFetchText(url, signal);
     if (relayed.ok && relayed.text.trim()) return relayed;
-    failures.push(`marketplace relay HTTP ${relayed.status}`);
+    failures.push(`marketplace API upstream HTTP ${relayed.status}`);
   } catch (error) {
-    failures.push(error instanceof Error ? error.message : "marketplace relay unavailable");
+    failures.push(error instanceof Error ? error.message : "frontend marketplace API unavailable");
   }
 
-  if (bridgeReady && !preferBridge) {
-    try {
-      return await tryBridge();
-    } catch (error) {
-      failures.push(error instanceof Error ? error.message : "Browser Bridge unavailable");
-    }
-  }
-
-  // Only attempt page-origin fetches for hosts known to permit CORS.
+  // Only attempt page-origin fetches for hosts known to permit CORS. Depop,
+  // Grailed and the other marketplace sites remain API-only in the frontend.
   if (directBrowserFetchAllowed(url)) {
     try {
       const direct = await directFetchText(url, signal);
@@ -564,6 +413,9 @@ async function fetchReadableText(
     }
   }
 
+  // Preserve the user-configurable Jina reader as a final client-side fallback.
+  // Depop normally reaches the same reader through /api/listings first, so this
+  // path is only used when the frontend API itself is unavailable.
   if (options.allowReader !== false && jinaApiKey()) {
     try {
       const reader = await readerFetchText(url, signal);
@@ -1356,11 +1208,9 @@ export async function searchMarketplaceFrontend(input: {
   const { marketplace, query, page = 0, mode = "active", signal, scanMode = "standard" } = input;
   const urls = frontendMarketplaceUrls(marketplace, query, page, mode);
   const allMarketsMode = scanMode === "all-markets";
-  const requestLimit = marketplace === "Depop"
-    ? 1
-    : allMarketsMode
-      ? (["Mercari Japan", "JDirectItems Auction", "Rakuten", "Rakuten Rakuma"].includes(marketplace) ? 2 : 1)
-      : (["Mercari Japan", "JDirectItems Auction", "Rakuten", "Rakuten Rakuma"].includes(marketplace) ? 3 : 2);
+  const requestLimit = allMarketsMode
+    ? (["Depop", "Mercari Japan", "JDirectItems Auction", "Rakuten", "Rakuten Rakuma"].includes(marketplace) ? 2 : 1)
+    : (["Depop", "Mercari Japan", "JDirectItems Auction", "Rakuten", "Rakuten Rakuma"].includes(marketplace) ? 3 : 2);
   const values: Array<{ response: TextResponse; responses: TextResponse[]; listings: Partial<Listing>[] }> = [];
   const rejected: string[] = [];
 
@@ -1410,15 +1260,16 @@ export async function searchMarketplaceFrontend(input: {
         ? grailedAlgoliaListings(algoliaResponse.text, mode, algoliaResponse.url) : [];
       values.push({ response: algoliaResponse, responses: [algoliaResponse], listings });
     } catch {
-      // Browser Bridge/page-source capture remains the primary Grailed path.
+      // Grailed official page-source remains available when the public index is unavailable.
     }
   }
 
   const searchListings = dedupeListings(values.flatMap((entry) => entry.listings));
   const hydrated = await hydrateListingPages(searchListings, marketplace, signal, {
-    // Depop search pages are already captured from a fully rendered browser tab.
-    // Avoid opening one active tab per product just to fill optional metadata.
-    maxCandidates: marketplace === "Depop" ? 0 : (allMarketsMode ? 1 : 4),
+    // Restore the earlier Depop product-page hydration path. Search cards remain
+    // usable immediately, while a bounded number of product pages fill missing
+    // image, price, condition, size, seller and description fields.
+    maxCandidates: allMarketsMode ? 1 : 4,
     maxWorkers: allMarketsMode ? 1 : 3,
   });
   const listings = dedupeListings(hydrated.listings);
@@ -1432,9 +1283,7 @@ export async function searchMarketplaceFrontend(input: {
     return {
       marketplace,
       status: "live",
-      message: transport.includes("extension")
-        ? `Loaded ${listings.length} real listing${listings.length === 1 ? "" : "s"} through Browser Bridge using your normal browser session${hydrated.hydrated ? ` and enriched ${hydrated.hydrated} product page${hydrated.hydrated === 1 ? "" : "s"}` : ""}.`
-        : `Loaded ${listings.length} real listing${listings.length === 1 ? "" : "s"} from official marketplace page sources${hydrated.hydrated ? ` and enriched ${hydrated.hydrated} product page${hydrated.hydrated === 1 ? "" : "s"}` : ""}.`,
+      message: `Loaded ${listings.length} real listing${listings.length === 1 ? "" : "s"} through the frontend marketplace API and official public page sources${readerFallbackUsed ? " with readable-page recovery" : ""}${hydrated.hydrated ? `; enriched ${hydrated.hydrated} product page${hydrated.hydrated === 1 ? "" : "s"}` : ""}.`,
       sourceUrl,
       listings,
       hasMore: listings.length >= 20,
@@ -1442,7 +1291,6 @@ export async function searchMarketplaceFrontend(input: {
         transport,
         attemptedUrls: urls,
         readableResponses: values.length,
-        extensionBridgeAvailable: extensionBridgeAvailable(),
         readerFallbackUsed,
         hydratedListings: hydrated.hydrated,
       },
@@ -1453,13 +1301,9 @@ export async function searchMarketplaceFrontend(input: {
     marketplace,
     status: "unavailable",
     message: marketplace === "Depop"
-      ? (extensionBridgeAvailable()
-          ? (rejected.find((entry) => /verification|authorized|forbidden|blocked/i.test(entry))
-              || "Depop opened normally but no rendered product cards were readable. Keep the Depop tab open, confirm the page displays results, then retry.")
-          : "Depop now uses the included Browser Bridge only. Load the extension and refresh ResaleMasterLab before searching.")
-      : extensionBridgeAvailable()
-        ? `No readable ${marketplace} cards were found. The Browser Bridge connected successfully; open the official search page once, complete any verification shown, then retry.`
-        : `No readable ${marketplace} cards were found. Install the included Browser Bridge to use your normal browser session when the cloud relay is blocked.`,
+      ? (rejected.find((entry) => /authorized|forbidden|blocked|challenge|reader|indexed/i.test(entry))
+          || "Depop did not expose readable cards through the frontend API. ResaleMasterLab tried the exact search page, then brand/theme and readable indexed product-page fallbacks; open the live search link to verify the current results.")
+      : `No readable ${marketplace} cards were found through the frontend marketplace API or official page-source fallbacks.`,
     sourceUrl,
     listings: [],
     hasMore: false,
@@ -1467,7 +1311,6 @@ export async function searchMarketplaceFrontend(input: {
       transport,
       attemptedUrls: urls,
       readableResponses: values.length,
-      extensionBridgeAvailable: extensionBridgeAvailable(),
       readerFallbackUsed,
       hydratedListings: 0,
     },
@@ -1663,7 +1506,7 @@ export async function searchAiWebFrontend(input: {
     searches: queries,
     listings,
     discoveredCount: unique.length,
-    discoveryMode: "bounded official-page relay + browser parsing + optional extension/Jina reader",
+    discoveryMode: "bounded frontend API + official-page parsing + readable/indexed fallbacks",
     targetedSecondhandSources: targets.map((target) => target.name),
   };
 }

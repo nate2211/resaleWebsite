@@ -32,17 +32,20 @@ test("parses structured page state and hydrates only missing listing fields", as
   assert.match(client, /jsonPayloadsFromScript/);
   assert.match(client, /canonicalListingUrl/);
   assert.match(client, /hydrateListingPages/);
-  assert.match(client, /maxCandidates: marketplace === "Depop" \? 0 : \(allMarketsMode \? 1 : 4\)/);
+  assert.match(client, /maxCandidates: allMarketsMode \? 1 : 4/);
   assert.match(client, /length: Math\.min\(maxWorkers, candidates\.length\)/);
   assert.match(client, /Promise\.allSettled\(workers\)/);
 });
 
-test("relay returns raw official page source with upstream metadata", async () => {
+test("relay returns official or recovered page source with upstream metadata", async () => {
   const route = await source("app/api/listings/route.ts");
-  assert.match(route, /market-search-depop-tab-capture-production-v19/);
+  assert.match(route, /market-search-frontend-api-depop-recovery-v20/);
   assert.match(route, /x-rml-upstream-status/);
   assert.match(route, /x-rml-final-url/);
   assert.match(route, /x-rml-upstream-content-type/);
+  assert.match(route, /x-rml-recovery-transport/);
+  assert.match(route, /fetchDepopReader/);
+  assert.match(route, /fetchIndexedDepopLinks/);
   assert.match(route, /new Response\(body/);
   assert.doesNotMatch(route, /quickAction|cloudflare:workers|BrowserRun|DOMParser/);
 });
