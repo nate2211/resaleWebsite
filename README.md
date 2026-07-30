@@ -1,10 +1,16 @@
-# ResaleMasterLab marketplace search URL recovery v17
+# ResaleMasterLab marketplace Browser Bridge recovery v18
 
 This release keeps every production feature from v16 and corrects the marketplace selector placement, Depop product-page extraction, and the exact ZenMarket search and product-link formats supplied for Mercari Japan, JDirectItems Auction, Rakuten, and Rakuten Rakuma.
 
 Production domain: `https://resalemasterlab.cloud-cord.com`
 
-## v17 changes
+## v18 changes
+
+- Browser Bridge 2.0 now uses the normal Chrome/Edge session before cloud relay fallbacks for Depop, Grailed, and Poshmark.
+- A rendered-tab capture path extracts official listing links, images, prices, JSON-LD, and hydrated DOM state.
+- 403 and human-verification pages become a guided retry state instead of raw denial HTML.
+- Grailed public-index outages no longer replace page-captured cards or leak the partial response object into marketplace status text.
+- The Browse page includes a live bridge connection container.
 
 ### Marketplace selector
 

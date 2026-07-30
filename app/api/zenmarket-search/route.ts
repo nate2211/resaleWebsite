@@ -3,7 +3,7 @@ import { unwrapZenMarketPayload } from "../../lib/zenmarket-source-parsers";
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
-const WORKER_REVISION = "market-search-url-recovery-production-v17";
+const WORKER_REVISION = "market-search-browser-bridge-production-v18";
 const MAX_BODY_BYTES = 2_000_000;
 const TOTAL_TIMEOUT_MS = 12_000;
 const ATTEMPT_TIMEOUT_MS = 4_500;

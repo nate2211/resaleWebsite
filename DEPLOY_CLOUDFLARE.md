@@ -54,7 +54,7 @@ Verify these URLs directly:
 
 The Worker has no Browser Run binding. Marketplace relays remain bounded to one official page per request. The image-comparison proxy is restricted to approved marketplace image CDNs, a 9-second timeout, and a 4.5 MB response limit.
 
-## v17 post-deploy checks
+## v18 post-deploy checks
 
 After deployment, verify the full navigation on `/`, `/thrift-check`, `/listing-template`, `/methodology`, and `/about` at desktop and mobile widths. The narrow layout should expose every link through the three-bar menu.
 
@@ -62,7 +62,7 @@ Run one Search All request and confirm `/api/health` reports:
 
 ```json
 {
-  "revision": "market-search-url-recovery-production-v17",
+  "revision": "market-search-browser-bridge-production-v18",
   "marketplaceBatchSize": { "standard": 3, "allMarkets": 2 },
   "marketplaceRelayConcurrency": 3,
   "depopDiscovery": "official-search-brand-theme-and-product-page-sources",

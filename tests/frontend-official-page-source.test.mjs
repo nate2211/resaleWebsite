@@ -39,7 +39,7 @@ test("parses structured page state and hydrates only missing listing fields", as
 
 test("relay returns raw official page source with upstream metadata", async () => {
   const route = await source("app/api/listings/route.ts");
-  assert.match(route, /market-search-url-recovery-production-v17/);
+  assert.match(route, /market-search-browser-bridge-production-v18/);
   assert.match(route, /x-rml-upstream-status/);
   assert.match(route, /x-rml-final-url/);
   assert.match(route, /x-rml-upstream-content-type/);

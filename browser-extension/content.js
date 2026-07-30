@@ -1,10 +1,21 @@
 const SOURCE = "resalemasterlab-browser-bridge";
+const VERSION = "2.0.0";
 const INSTALL_KEY = "__RML_BROWSER_BRIDGE_CONTENT_INSTALLED__";
+
+function announceReady() {
+  document.documentElement.dataset.rmlBridge = "ready";
+  document.documentElement.dataset.rmlBridgeVersion = VERSION;
+  window.postMessage({
+    type: "RML_BRIDGE_READY",
+    source: SOURCE,
+    version: VERSION,
+    capabilities: ["session-fetch", "tab-capture", "challenge-recovery"]
+  }, "*");
+}
 
 if (!window[INSTALL_KEY]) {
   Object.defineProperty(window, INSTALL_KEY, { value: true, configurable: false });
-  document.documentElement.dataset.rmlBridge = "ready";
-  window.postMessage({ type: "RML_BRIDGE_READY", source: SOURCE }, "*");
+  announceReady();
 
   window.addEventListener("message", (event) => {
     if (event.source !== window) return;
@@ -19,6 +30,7 @@ if (!window[INSTALL_KEY]) {
         type: "RML_FETCH_RESPONSE",
         id: data.id,
         source: SOURCE,
+        version: VERSION,
         response: lastError
           ? { ok: false, status: 0, error: lastError.message }
           : response
@@ -26,6 +38,5 @@ if (!window[INSTALL_KEY]) {
     });
   });
 } else {
-  document.documentElement.dataset.rmlBridge = "ready";
-  window.postMessage({ type: "RML_BRIDGE_READY", source: SOURCE }, "*");
+  announceReady();
 }

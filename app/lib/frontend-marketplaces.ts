@@ -53,6 +53,8 @@ type TextResponse = {
   contentType: string;
   text: string;
   transport: "frontend-api" | "grailed-algolia" | "direct" | "extension" | "reader";
+  requiresUserAction?: boolean;
+  message?: string;
 };
 
 type BridgeResponse = {
@@ -62,6 +64,10 @@ type BridgeResponse = {
   contentType?: string;
   body?: string;
   error?: string;
+  challenge?: boolean;
+  requiresUserAction?: boolean;
+  transport?: string;
+  recordCount?: number;
 };
 
 const MAX_RESPONSE_CHARS = 5_500_000;
@@ -343,7 +349,7 @@ function ensureBridgeResponseListener() {
     if (data?.type !== "RML_FETCH_RESPONSE" || typeof data.id !== "string") return;
     const value = data.response;
     settleBridgeRequest(data.id, (pending) => {
-      if (!value || value.error) {
+      if (!value || (value.error && !value.body)) {
         pending.reject(new Error(value?.error || "Browser bridge request failed."));
         return;
       }
@@ -354,6 +360,8 @@ function ensureBridgeResponseListener() {
         contentType: value.contentType || "",
         text: (value.body || "").slice(0, MAX_RESPONSE_CHARS),
         transport: "extension",
+        requiresUserAction: Boolean(value.requiresUserAction),
+        message: value.error || "",
       });
     });
   });
@@ -410,7 +418,7 @@ async function extensionFetchText(url: string, signal?: AbortSignal): Promise<Te
   }).__RML_EXTENSION_FETCH__;
   if (typeof injected === "function") {
     const value = await injected({ url });
-    if (!value || value.error) throw new Error(value?.error || "Browser bridge request failed.");
+    if (!value || (value.error && !value.body)) throw new Error(value?.error || "Browser bridge request failed.");
     return {
       ok: Boolean(value.ok),
       status: Number(value.status) || 0,
@@ -418,6 +426,8 @@ async function extensionFetchText(url: string, signal?: AbortSignal): Promise<Te
       contentType: value.contentType || "",
       text: (value.body || "").slice(0, MAX_RESPONSE_CHARS),
       transport: "extension",
+      requiresUserAction: Boolean(value.requiresUserAction),
+      message: value.error || "",
     };
   }
 
@@ -491,28 +501,47 @@ async function fetchReadableText(
 ): Promise<TextResponse> {
   const failures: string[] = [];
   const bridgeReady = extensionBridgeAvailable();
+  const hostname = (() => {
+    try { return new URL(url).hostname.toLowerCase(); } catch { return ""; }
+  })();
+  const preferBridge = bridgeReady && ["depop.com", "grailed.com", "poshmark.com"]
+    .some((domain) => hostnameMatches(hostname, domain));
 
-  // Restore the earlier frontend API marketplace-results flow. The same-origin
-  // route performs one bounded upstream fetch and returns the raw response; all
-  // JSON/HTML/markdown parsing remains here in the browser.
+  const tryBridge = async () => {
+    try {
+      const bridged = await extensionFetchText(url, signal);
+      if (bridged.requiresUserAction) {
+        throw new Error(bridged.message || "Complete the marketplace verification tab, then retry the search.");
+      }
+      if (bridged.ok && bridged.text.trim()) return bridged;
+      failures.push(bridged.message || `Browser Bridge HTTP ${bridged.status}`);
+    } catch (error) {
+      failures.push(error instanceof Error ? error.message : "Browser Bridge unavailable");
+    }
+    return null;
+  };
+
+  // Depop, Grailed, and Poshmark commonly reject cloud egress. When the bridge
+  // is installed, use the user's normal browser session first instead of
+  // producing a predictable 403 before falling back.
+  if (preferBridge) {
+    const bridged = await tryBridge();
+    if (bridged) return bridged;
+  }
+
+  // The same-origin route remains the no-extension fallback and works for
+  // marketplaces that permit bounded Cloudflare page-source requests.
   try {
     const relayed = await frontendApiFetchText(url, signal);
     if (relayed.ok && relayed.text.trim()) return relayed;
-    failures.push(`frontend API upstream HTTP ${relayed.status}`);
+    failures.push(`marketplace relay HTTP ${relayed.status}`);
   } catch (error) {
-    failures.push(error instanceof Error ? error.message : "frontend marketplace API unavailable");
+    failures.push(error instanceof Error ? error.message : "marketplace relay unavailable");
   }
 
-  // Keep the bridge as an optional fallback for marketplaces that block
-  // Cloudflare egress, but never add one listener per request.
-  if (bridgeReady) {
-    try {
-      const bridged = await extensionFetchText(url, signal);
-      if (bridged.ok && bridged.text.trim()) return bridged;
-      failures.push(`extension HTTP ${bridged.status}`);
-    } catch (error) {
-      failures.push(error instanceof Error ? error.message : "extension bridge unavailable");
-    }
+  if (bridgeReady && !preferBridge) {
+    const bridged = await tryBridge();
+    if (bridged) return bridged;
   }
 
   // Only attempt page-origin fetches for hosts known to permit CORS.
@@ -1359,7 +1388,9 @@ export async function searchMarketplaceFrontend(input: {
     }
   }
 
-  if (marketplace === "Grailed") {
+  const hasGrailedPageCards = marketplace === "Grailed"
+    && values.some((entry) => entry.listings.length > 0);
+  if (marketplace === "Grailed" && !hasGrailedPageCards) {
     const config = values.map((entry) => parseGrailedPublicConfig(entry.response.text)).find(Boolean)
       || GRAILED_PUBLIC_CONFIG_FALLBACK;
     try {
@@ -1368,7 +1399,7 @@ export async function searchMarketplaceFrontend(input: {
         ? grailedAlgoliaListings(algoliaResponse.text, mode, algoliaResponse.url) : [];
       values.push({ response: algoliaResponse, responses: [algoliaResponse], listings });
     } catch {
-      // Grailed's normal page source remains available as a fallback.
+      // Browser Bridge/page-source capture remains the primary Grailed path.
     }
   }
 
@@ -1388,7 +1419,9 @@ export async function searchMarketplaceFrontend(input: {
     return {
       marketplace,
       status: "live",
-      message: `Loaded ${listings.length} real listing${listings.length === 1 ? "" : "s"} from official marketplace page sources${hydrated.hydrated ? ` and enriched ${hydrated.hydrated} product page${hydrated.hydrated === 1 ? "" : "s"}` : ""}.`,
+      message: transport.includes("extension")
+        ? `Loaded ${listings.length} real listing${listings.length === 1 ? "" : "s"} through Browser Bridge using your normal browser session${hydrated.hydrated ? ` and enriched ${hydrated.hydrated} product page${hydrated.hydrated === 1 ? "" : "s"}` : ""}.`
+        : `Loaded ${listings.length} real listing${listings.length === 1 ? "" : "s"} from official marketplace page sources${hydrated.hydrated ? ` and enriched ${hydrated.hydrated} product page${hydrated.hydrated === 1 ? "" : "s"}` : ""}.`,
       sourceUrl,
       listings,
       hasMore: listings.length >= 20,
@@ -1406,7 +1439,9 @@ export async function searchMarketplaceFrontend(input: {
   return {
     marketplace,
     status: "unavailable",
-    message: `The frontend marketplace-results API and browser fallbacks could not read ${marketplace}'s listing data. Open the live search page directly${extensionBridgeAvailable() ? "; the browser bridge responded but no product cards were readable" : ", or install the included browser bridge for CORS-blocked marketplaces"}.`,
+    message: extensionBridgeAvailable()
+      ? `No readable ${marketplace} cards were found. The Browser Bridge connected successfully; open the official search page once, complete any verification shown, then retry.`
+      : `No readable ${marketplace} cards were found. Install the included Browser Bridge to use your normal browser session when the cloud relay is blocked.`,
     sourceUrl,
     listings: [],
     hasMore: false,

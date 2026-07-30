@@ -3,7 +3,7 @@ export const runtime = "edge";
 export async function GET() {
   return Response.json({
     ok: true,
-    revision: "market-search-url-recovery-production-v17",
+    revision: "market-search-browser-bridge-production-v18",
     marketplaceRequests: "official-page-source-relay",
     grailedSearch: "public-index-relay",
     browserBindingAvailable: false,

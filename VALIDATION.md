@@ -1,4 +1,4 @@
-# Validation — market-search-url-recovery-production-v17
+# Validation — market-search-browser-bridge-production-v18
 
 Completed in the packaging environment:
 
@@ -19,7 +19,7 @@ Completed in the packaging environment:
 - Failed marketplace network relays return an HTTP 200 error envelope with `x-rml-relay-error`, allowing the frontend to continue without a visible 502 response.
 - Grailed nested-image and active/sold public-index fixtures remain passing.
 - All-market scheduling remains bounded at two marketplaces per all-market batch and three simultaneous relay slots.
-- Production revision checks expect `market-search-url-recovery-production-v17`.
+- Production revision checks expect `market-search-browser-bridge-production-v18`.
 - ZIP CRC, file count, and SHA-256 are verified after packaging.
 - Clean project file count: 121 files.
 

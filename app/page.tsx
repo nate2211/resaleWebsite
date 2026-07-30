@@ -192,8 +192,14 @@ function clampNumber(value: string, fallback = 0) {
 
 function requestErrorMessage(error: unknown, fallback: string) {
   if (error instanceof DOMException && error.name === "AbortError") return "Request cancelled.";
-  if (error instanceof Error && error.message.trim()) return error.message;
-  return fallback;
+  const message = error instanceof Error ? error.message.trim() : "";
+  if (/sorry,? not authorized|403 forbidden|you (?:have been|were) blocked/i.test(message)) {
+    return "The marketplace blocked the cloud request. Use Browser Bridge, complete any verification tab it opens, and retry.";
+  }
+  if (/"hits"\s*:\s*\[\]|Grailed's public listing index was temporarily unavailable/i.test(message)) {
+    return "Grailed's public index did not respond, so ResaleMasterLab is continuing with official page capture through Browser Bridge.";
+  }
+  return message || fallback;
 }
 
 async function readApiJson<T>(response: Response, label: string): Promise<T> {
@@ -2947,6 +2953,10 @@ function BrowseView({
   );
   const [webSearchListings, setWebSearchListings] = useState<Listing[]>([]);
   const [marketSelectionMessage, setMarketSelectionMessage] = useState("");
+  const [browserBridge, setBrowserBridge] = useState<{ connected: boolean; version: string }>({
+    connected: false,
+    version: "",
+  });
   const webSearchAbortController = useRef<AbortController | null>(null);
   const requestInFlight = useRef(false);
   const requestGeneration = useRef(0);
@@ -2997,6 +3007,23 @@ function BrowseView({
     category, marketFilter, brandFilter, sizeFilter, conditionFilter, articleFilter,
     minimumPrice, maximumPrice, listedAfter, listedBefore, liveSort, aiWebSearchSelected,
   ]);
+  useEffect(() => {
+    const detect = () => setBrowserBridge({
+      connected: document.documentElement.dataset.rmlBridge === "ready",
+      version: document.documentElement.dataset.rmlBridgeVersion || "",
+    });
+    const onReady = (event: MessageEvent) => {
+      if (event.source !== window || event.data?.type !== "RML_BRIDGE_READY") return;
+      setBrowserBridge({ connected: true, version: String(event.data.version || "") });
+    };
+    detect();
+    window.addEventListener("message", onReady);
+    const timer = window.setTimeout(detect, 700);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("message", onReady);
+    };
+  }, []);
   useEffect(() => {
     liveStateRef.current = liveState;
   }, [liveState]);
@@ -3668,6 +3695,21 @@ function BrowseView({
         <button type="button" className="primary-button" onClick={onImport}>
           + Inspect listing URL
         </button>
+      </section>
+
+      <section className={`browser-bridge-container ${browserBridge.connected ? "connected" : "missing"}`} aria-live="polite">
+        <div>
+          <span className="browser-bridge-dot" aria-hidden="true" />
+          <strong>{browserBridge.connected ? "Browser Bridge connected" : "Browser Bridge not detected"}</strong>
+          <small>
+            {browserBridge.connected
+              ? `Version ${browserBridge.version || "2.x"} can capture Depop and Grailed through your normal browser session.`
+              : "Load the included browser-extension folder as an unpacked Chrome/Edge extension, then reload this page."}
+          </small>
+        </div>
+        <span className="browser-bridge-mode">
+          {browserBridge.connected ? "Session + tab capture" : "Cloud relay only"}
+        </span>
       </section>
 
       <section className="browse-search panel">

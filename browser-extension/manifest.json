@@ -1,10 +1,11 @@
 {
   "manifest_version": 3,
   "name": "ResaleMasterLab Browser Bridge",
-  "version": "1.2.0",
-  "description": "Official marketplace page-source bridge for ResaleMasterLab. Fetches normal search and product pages when a site blocks the same-origin relay.",
+  "version": "2.0.0",
+  "description": "Reads official marketplace pages through your normal Chrome or Edge session when cloud relays are blocked.",
   "permissions": [
-    "storage"
+    "storage",
+    "tabs"
   ],
   "host_permissions": [
     "https://www.depop.com/*",
@@ -14,13 +15,15 @@
     "https://zenmarket.jp/*",
     "https://search.rakuten.co.jp/*",
     "https://item.rakuten.co.jp/*",
+    "https://auctions.yahoo.co.jp/*",
     "https://fril.jp/*",
     "https://globalbunjang.com/*",
     "https://www.ebay.com/*",
     "https://www.mercari.com/*",
     "https://www.facebook.com/marketplace/*",
-    "https://r.jina.ai/*",
-    "https://s.jina.ai/*"
+    "https://www.superbuy.com/*",
+    "https://www.goofish.com/*",
+    "https://2.taobao.com/*"
   ],
   "background": {
     "service_worker": "background.js",
@@ -30,11 +33,38 @@
     {
       "matches": [
         "https://resalemasterlab.cloud-cord.com/*",
+        "https://resalemasterlab.com/*",
+        "https://www.resalemasterlab.com/*",
+        "https://resalewebsite.unusualsuspectsclothing.workers.dev/*",
         "http://localhost/*",
         "http://127.0.0.1/*"
       ],
       "js": [
         "content.js"
+      ],
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "https://www.depop.com/*",
+        "https://www.grailed.com/*",
+        "https://poshmark.com/*",
+        "https://jp.mercari.com/*",
+        "https://zenmarket.jp/*",
+        "https://search.rakuten.co.jp/*",
+        "https://item.rakuten.co.jp/*",
+        "https://auctions.yahoo.co.jp/*",
+        "https://fril.jp/*",
+        "https://globalbunjang.com/*",
+        "https://www.ebay.com/*",
+        "https://www.mercari.com/*",
+        "https://www.facebook.com/marketplace/*",
+        "https://www.superbuy.com/*",
+        "https://www.goofish.com/*",
+        "https://2.taobao.com/*"
+      ],
+      "js": [
+        "marketplace-content.js"
       ],
       "run_at": "document_start"
     }

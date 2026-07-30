@@ -1,6 +1,6 @@
 {
   "name": "resalemasterlab",
-  "version": "1.4.1",
+  "version": "1.5.0",
   "private": true,
   "engines": {
     "node": ">=22.13.0"
@@ -56,5 +56,5 @@
     "wrangler": "4.92.0"
   },
   "type": "module",
-  "description": "Production ResaleMasterLab with a compact selector below the default market cards, exact Depop product-source parsing, and corrected ZenMarket store searches and product routes."
+  "description": "ResaleMasterLab with Browser Bridge 2.0 session-aware marketplace capture and graceful Depop/Grailed recovery."
 }
