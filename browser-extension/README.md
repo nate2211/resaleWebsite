@@ -1,17 +1,23 @@
-# ResaleMasterLab Browser Bridge 2.0
+# ResaleMasterLab Browser Bridge 3.0
 
-This Chrome/Edge extension lets ResaleMasterLab read official marketplace pages through your normal browser session when a Cloudflare relay receives a 403, a bot challenge, or an empty server-rendered page.
+Browser Bridge 3.0 captures marketplace cards from normal rendered Chrome or Edge tabs.
 
-The bridge does not forge tracking updates, bypass account permissions, or defeat a marketplace challenge. It first tries a credentialed extension request. If that response is blocked or incomplete, it opens the official marketplace search in a normal browser tab, waits for the page to render, and returns a bounded DOM snapshot to ResaleMasterLab for local parsing. When a marketplace asks for human verification, the tab is brought forward so you can complete it; retry the search afterward.
+## Important Depop behavior
+
+Depop does not use an extension background request or the Cloudflare page-source relay. The bridge opens the exact public Depop search URL in a visible tab, waits for React/Next hydration, performs a bounded scroll, and returns a local DOM snapshot to ResaleMasterLab. This restores the prior normal-page behavior and removes the two request paths that were returning `403 Forbidden`.
+
+A Depop verification page is not copied into listing results. The official tab remains visible so the user can complete verification and retry.
+
+Grailed and Poshmark use rendered tab capture first and retain bounded secondary fallbacks. Other enabled marketplaces retain session-aware or page-source fallbacks.
 
 ## Install in Chrome or Edge
 
 1. Open `chrome://extensions` or `edge://extensions`.
 2. Enable **Developer mode**.
-3. Remove an older ResaleMasterLab Browser Bridge if one is installed.
+3. Remove the previous ResaleMasterLab Browser Bridge.
 4. Choose **Load unpacked**.
 5. Select this `browser-extension` folder.
-6. Reload ResaleMasterLab. The marketplace page shows **Browser Bridge connected** when the extension is detected.
+6. Reload ResaleMasterLab and confirm **Browser Bridge connected**.
 
 ## Supported application origins
 
@@ -21,4 +27,4 @@ The bridge does not forge tracking updates, bypass account permissions, or defea
 - `https://resalewebsite.unusualsuspectsclothing.workers.dev`
 - local `localhost` and `127.0.0.1` development origins
 
-Only the marketplace hosts declared in `manifest.json` can be opened or read.
+Only hosts declared in `manifest.json` can be opened or captured.

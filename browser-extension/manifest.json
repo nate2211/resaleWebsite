@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "ResaleMasterLab Browser Bridge",
-  "version": "2.0.0",
-  "description": "Reads official marketplace pages through your normal Chrome or Edge session when cloud relays are blocked.",
+  "version": "3.0.0",
+  "description": "Captures Depop and other marketplace results from normal rendered Chrome or Edge tabs without routing Depop through cloud fetches.",
   "permissions": [
     "storage",
     "tabs"

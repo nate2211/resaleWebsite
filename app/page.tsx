@@ -3703,12 +3703,12 @@ function BrowseView({
           <strong>{browserBridge.connected ? "Browser Bridge connected" : "Browser Bridge not detected"}</strong>
           <small>
             {browserBridge.connected
-              ? `Version ${browserBridge.version || "2.x"} can capture Depop and Grailed through your normal browser session.`
+              ? `Version ${browserBridge.version || "3.x"} can capture Depop and Grailed through your normal browser session.`
               : "Load the included browser-extension folder as an unpacked Chrome/Edge extension, then reload this page."}
           </small>
         </div>
         <span className="browser-bridge-mode">
-          {browserBridge.connected ? "Session + tab capture" : "Cloud relay only"}
+          {browserBridge.connected ? "Depop rendered-tab capture" : "Depop extension required"}
         </span>
       </section>
 

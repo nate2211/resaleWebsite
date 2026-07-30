@@ -5,14 +5,14 @@ import test from "node:test";
 const root = new URL("../", import.meta.url);
 const source = (path) => readFile(new URL(path, root), "utf8");
 
-test("frontend prefers Browser Bridge for marketplaces that reject cloud egress", async () => {
+test("frontend makes Depop browser-tab-only while retaining bounded fallbacks elsewhere", async () => {
   const client = await source("app/lib/frontend-marketplaces.ts");
   assert.match(client, /frontendApiFetchText/);
   assert.match(client, /\/api\/listings\?source=/);
   assert.match(client, /x-rml-upstream-status/);
-  assert.match(client, /const preferBridge = bridgeReady/);
-  assert.match(client, /\["depop\.com", "grailed\.com", "poshmark\.com"\]/);
-  assert.match(client, /if \(preferBridge\)[\s\S]*?const bridged = await tryBridge\(\)/);
+  assert.match(client, /const isDepop = hostnameMatches\(hostname, "depop\.com"\)/);
+  assert.match(client, /if \(isDepop\)[\s\S]*?return await tryBridge\(\)/);
+  assert.match(client, /Depop requires the included Browser Bridge/);
   assert.match(client, /const relayed = await frontendApiFetchText/);
 });
 
@@ -43,21 +43,22 @@ test("Browser Bridge captures rendered marketplace tabs and preserves verificati
   const manifest = JSON.parse(await source("browser-extension/manifest.json"));
   const background = await source("browser-extension/background.js");
   const marketplace = await source("browser-extension/marketplace-content.js");
-  assert.equal(manifest.version, "2.0.0");
+  assert.equal(manifest.version, "3.0.0");
   assert.ok(manifest.permissions.includes("tabs"));
   assert.ok(manifest.content_scripts.some((entry) => entry.js.includes("marketplace-content.js")));
-  assert.match(background, /credentials: "include"/);
+  assert.match(background, /Depop is intentionally tab-only/);
   assert.match(background, /captureThroughTab/);
+  assert.match(background, /interactive: true/);
   assert.match(background, /requiresUserAction/);
   assert.match(marketplace, /RML_CAPTURE_PAGE/);
   assert.match(marketplace, /__RML_BRIDGE_SNAPSHOT__/);
-  assert.match(marketplace, /Marketplace verification is open in a browser tab/);
+  assert.match(marketplace, /Depop opened its verification page in the browser/);
 });
 
 test("health and deployment identify Browser Bridge-aware revision", async () => {
   const health = await source("app/api/health/route.ts");
   const wrangler = await source("wrangler.jsonc");
-  assert.match(health, /market-search-browser-bridge-production-v18/);
+  assert.match(health, /market-search-depop-tab-capture-production-v19/);
   assert.match(wrangler, /official-page-source-relay/);
   assert.doesNotMatch(wrangler, /"browser"\s*:/i);
 });

@@ -16,7 +16,7 @@ test("targets the production custom domain while retaining workers.dev diagnosti
 
 test("production checker verifies the bounded marketplace results API", async () => {
   const checker = await source("scripts/check-production.mjs");
-  assert.match(checker, /market-search-browser-bridge-production-v18/);
+  assert.match(checker, /market-search-depop-tab-capture-production-v19/);
   assert.match(checker, /one-official-page-per-relay-request/);
   assert.match(checker, /x-rml-upstream-status/);
   assert.match(checker, /example\.com/);

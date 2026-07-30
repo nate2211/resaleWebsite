@@ -71,7 +71,7 @@ type BridgeResponse = {
 };
 
 const MAX_RESPONSE_CHARS = 5_500_000;
-const BRIDGE_TIMEOUT_MS = 18_000;
+const BRIDGE_TIMEOUT_MS = 55_000;
 const DIRECT_TIMEOUT_MS = 12_000;
 const READER_TIMEOUT_MS = 20_000;
 const JINA_KEY_STORAGE = "rml:jina-reader-key";
@@ -349,7 +349,7 @@ function ensureBridgeResponseListener() {
     if (data?.type !== "RML_FETCH_RESPONSE" || typeof data.id !== "string") return;
     const value = data.response;
     settleBridgeRequest(data.id, (pending) => {
-      if (!value || (value.error && !value.body)) {
+      if (!value || (value.error && !value.body && !value.requiresUserAction)) {
         pending.reject(new Error(value?.error || "Browser bridge request failed."));
         return;
       }
@@ -418,7 +418,7 @@ async function extensionFetchText(url: string, signal?: AbortSignal): Promise<Te
   }).__RML_EXTENSION_FETCH__;
   if (typeof injected === "function") {
     const value = await injected({ url });
-    if (!value || (value.error && !value.body)) throw new Error(value?.error || "Browser bridge request failed.");
+    if (!value || (value.error && !value.body && !value.requiresUserAction)) throw new Error(value?.error || "Browser bridge request failed.");
     return {
       ok: Boolean(value.ok),
       status: Number(value.status) || 0,
@@ -504,33 +504,39 @@ async function fetchReadableText(
   const hostname = (() => {
     try { return new URL(url).hostname.toLowerCase(); } catch { return ""; }
   })();
-  const preferBridge = bridgeReady && ["depop.com", "grailed.com", "poshmark.com"]
+  const isDepop = hostnameMatches(hostname, "depop.com");
+  const preferBridge = bridgeReady && ["grailed.com", "poshmark.com"]
     .some((domain) => hostnameMatches(hostname, domain));
 
   const tryBridge = async () => {
+    const bridged = await extensionFetchText(url, signal);
+    if (bridged.requiresUserAction) {
+      throw new Error(bridged.message || "Complete the marketplace verification tab, then retry the search.");
+    }
+    if (bridged.ok && bridged.text.trim()) return bridged;
+    throw new Error(bridged.message || `Browser Bridge HTTP ${bridged.status}`);
+  };
+
+  // Depop is browser-tab-only. Do not fall through to the Cloudflare relay or
+  // an extension background fetch: those are the paths that returned the raw
+  // "Sorry, not authorized" page. The bridge opens the normal Depop URL in a
+  // visible tab and captures the rendered listing cards after hydration.
+  if (isDepop) {
+    if (!bridgeReady) {
+      throw new Error("Depop requires the included Browser Bridge. Load the extension, refresh ResaleMasterLab, and search again.");
+    }
+    return await tryBridge();
+  }
+
+  if (preferBridge) {
     try {
-      const bridged = await extensionFetchText(url, signal);
-      if (bridged.requiresUserAction) {
-        throw new Error(bridged.message || "Complete the marketplace verification tab, then retry the search.");
-      }
-      if (bridged.ok && bridged.text.trim()) return bridged;
-      failures.push(bridged.message || `Browser Bridge HTTP ${bridged.status}`);
+      return await tryBridge();
     } catch (error) {
       failures.push(error instanceof Error ? error.message : "Browser Bridge unavailable");
     }
-    return null;
-  };
-
-  // Depop, Grailed, and Poshmark commonly reject cloud egress. When the bridge
-  // is installed, use the user's normal browser session first instead of
-  // producing a predictable 403 before falling back.
-  if (preferBridge) {
-    const bridged = await tryBridge();
-    if (bridged) return bridged;
   }
 
-  // The same-origin route remains the no-extension fallback and works for
-  // marketplaces that permit bounded Cloudflare page-source requests.
+  // Non-Depop marketplaces retain the bounded same-origin page-source relay.
   try {
     const relayed = await frontendApiFetchText(url, signal);
     if (relayed.ok && relayed.text.trim()) return relayed;
@@ -540,8 +546,11 @@ async function fetchReadableText(
   }
 
   if (bridgeReady && !preferBridge) {
-    const bridged = await tryBridge();
-    if (bridged) return bridged;
+    try {
+      return await tryBridge();
+    } catch (error) {
+      failures.push(error instanceof Error ? error.message : "Browser Bridge unavailable");
+    }
   }
 
   // Only attempt page-origin fetches for hosts known to permit CORS.
@@ -1347,9 +1356,11 @@ export async function searchMarketplaceFrontend(input: {
   const { marketplace, query, page = 0, mode = "active", signal, scanMode = "standard" } = input;
   const urls = frontendMarketplaceUrls(marketplace, query, page, mode);
   const allMarketsMode = scanMode === "all-markets";
-  const requestLimit = allMarketsMode
-    ? (["Depop", "Mercari Japan", "JDirectItems Auction", "Rakuten", "Rakuten Rakuma"].includes(marketplace) ? 2 : 1)
-    : (["Depop", "Mercari Japan", "JDirectItems Auction", "Rakuten", "Rakuten Rakuma"].includes(marketplace) ? 3 : 2);
+  const requestLimit = marketplace === "Depop"
+    ? 1
+    : allMarketsMode
+      ? (["Mercari Japan", "JDirectItems Auction", "Rakuten", "Rakuten Rakuma"].includes(marketplace) ? 2 : 1)
+      : (["Mercari Japan", "JDirectItems Auction", "Rakuten", "Rakuten Rakuma"].includes(marketplace) ? 3 : 2);
   const values: Array<{ response: TextResponse; responses: TextResponse[]; listings: Partial<Listing>[] }> = [];
   const rejected: string[] = [];
 
@@ -1405,7 +1416,9 @@ export async function searchMarketplaceFrontend(input: {
 
   const searchListings = dedupeListings(values.flatMap((entry) => entry.listings));
   const hydrated = await hydrateListingPages(searchListings, marketplace, signal, {
-    maxCandidates: allMarketsMode ? 1 : 4,
+    // Depop search pages are already captured from a fully rendered browser tab.
+    // Avoid opening one active tab per product just to fill optional metadata.
+    maxCandidates: marketplace === "Depop" ? 0 : (allMarketsMode ? 1 : 4),
     maxWorkers: allMarketsMode ? 1 : 3,
   });
   const listings = dedupeListings(hydrated.listings);
@@ -1439,9 +1452,14 @@ export async function searchMarketplaceFrontend(input: {
   return {
     marketplace,
     status: "unavailable",
-    message: extensionBridgeAvailable()
-      ? `No readable ${marketplace} cards were found. The Browser Bridge connected successfully; open the official search page once, complete any verification shown, then retry.`
-      : `No readable ${marketplace} cards were found. Install the included Browser Bridge to use your normal browser session when the cloud relay is blocked.`,
+    message: marketplace === "Depop"
+      ? (extensionBridgeAvailable()
+          ? (rejected.find((entry) => /verification|authorized|forbidden|blocked/i.test(entry))
+              || "Depop opened normally but no rendered product cards were readable. Keep the Depop tab open, confirm the page displays results, then retry.")
+          : "Depop now uses the included Browser Bridge only. Load the extension and refresh ResaleMasterLab before searching.")
+      : extensionBridgeAvailable()
+        ? `No readable ${marketplace} cards were found. The Browser Bridge connected successfully; open the official search page once, complete any verification shown, then retry.`
+        : `No readable ${marketplace} cards were found. Install the included Browser Bridge to use your normal browser session when the cloud relay is blocked.`,
     sourceUrl,
     listings: [],
     hasMore: false,

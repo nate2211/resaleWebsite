@@ -1,4 +1,4 @@
-# Validation — market-search-browser-bridge-production-v18
+# Validation — market-search-depop-tab-capture-production-v19
 
 Completed in the packaging environment:
 
@@ -19,7 +19,7 @@ Completed in the packaging environment:
 - Failed marketplace network relays return an HTTP 200 error envelope with `x-rml-relay-error`, allowing the frontend to continue without a visible 502 response.
 - Grailed nested-image and active/sold public-index fixtures remain passing.
 - All-market scheduling remains bounded at two marketplaces per all-market batch and three simultaneous relay slots.
-- Production revision checks expect `market-search-browser-bridge-production-v18`.
+- Production revision checks expect `market-search-depop-tab-capture-production-v19`.
 - ZIP CRC, file count, and SHA-256 are verified after packaging.
 - Clean project file count: 121 files.
 
@@ -28,3 +28,13 @@ Dependency-backed build note:
 - `node_modules` is intentionally excluded from the artifact.
 - `package-lock.json` is included for Cloudflare's clean installation.
 - A fresh full Vinext production build was not run in this packaging environment.
+
+
+## Depop rendered-tab v19
+
+- Depop cloud relay disabled.
+- Depop extension background fetch disabled.
+- One visible normal Depop tab per search.
+- 45 tests passed.
+- Extension JavaScript syntax checks passed.
+- Changed marketplace and relay TypeScript files passed standalone checking.

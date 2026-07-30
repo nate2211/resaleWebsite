@@ -1,13 +1,12 @@
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
-const WORKER_REVISION = "market-search-browser-bridge-production-v18";
+const WORKER_REVISION = "market-search-depop-tab-capture-production-v19";
 const MAX_BODY_BYTES = 5_500_000;
 const UPSTREAM_TIMEOUT_MS = 15_000;
 const MAX_REDIRECTS = 2;
 
 const ALLOWED_MARKETPLACE_HOSTS = [
-  "depop.com",
   "grailed.com",
   "poshmark.com",
   "jp.mercari.com",
@@ -40,6 +39,9 @@ function parseAllowedUrl(value: string) {
     throw new Error("Marketplace URLs cannot contain credentials or custom ports.");
   }
   const hostname = parsed.hostname.toLowerCase();
+  if (hostnameMatches(hostname, "depop.com")) {
+    throw new Error("Depop is browser-tab-only in this build and is never requested from the Cloudflare relay.");
+  }
   if (!ALLOWED_MARKETPLACE_HOSTS.some((domain) => hostnameMatches(hostname, domain))) {
     throw new Error("That marketplace host is not allowed by the page-source relay.");
   }
@@ -109,8 +111,6 @@ async function fetchMarketplacePage(initialUrl: URL, requestSignal: AbortSignal)
       };
       if (hostnameMatches(current.hostname.toLowerCase(), "zenmarket.jp")) {
         requestHeaders.referer = "https://zenmarket.jp/en/";
-      } else if (hostnameMatches(current.hostname.toLowerCase(), "depop.com")) {
-        requestHeaders.referer = "https://www.depop.com/";
       }
       const response = await fetch(current, {
         method: "GET",

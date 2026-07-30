@@ -47,7 +47,7 @@ for (const route of ["/thrift-check", "/listing-template", "/manifest.webmanifes
 const healthResult = await read("/api/health");
 if (!healthResult.response.ok) throw new Error(`/api/health returned HTTP ${healthResult.response.status}.`);
 const health = JSON.parse(healthResult.text);
-if (health.revision !== "market-search-browser-bridge-production-v18") {
+if (health.revision !== "market-search-depop-tab-capture-production-v19") {
   throw new Error(`The domain is serving an older revision: ${health.revision || "unknown"}.`);
 }
 if (health.marketplaceRequests !== "official-page-source-relay"
@@ -66,7 +66,7 @@ if (!upstreamStatus || !/depop\.com/i.test(finalUrl) || relayResult.text.length 
   throw new Error("The marketplace relay did not return a readable official Depop page source.");
 }
 if (!/official-page-source-relay/i.test(relayResult.response.headers.get("x-rml-marketplace-mode") || "")) {
-  throw new Error("The marketplace endpoint is not serving the v18 Browser Bridge-aware marketplace transport.");
+  throw new Error("The marketplace endpoint is not serving the v19 Depop rendered-tab marketplace transport.");
 }
 
 const grailedResult = await post("/api/grailed-search", {

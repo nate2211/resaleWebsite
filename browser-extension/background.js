@@ -1,12 +1,10 @@
 const MAX_BODY_CHARS = 4_800_000;
 const INSTALL_KEY = "__RML_BROWSER_BRIDGE_BACKGROUND_INSTALLED__";
-const APP_ORIGINS = new Set([
-  "https://resalemasterlab.cloud-cord.com",
-  "https://resalemasterlab.com",
-  "https://www.resalemasterlab.com",
-  "https://resalewebsite.unusualsuspectsclothing.workers.dev",
-  "http://localhost",
-  "http://127.0.0.1"
+const APP_HOSTS = new Set([
+  "resalemasterlab.cloud-cord.com",
+  "resalemasterlab.com",
+  "www.resalemasterlab.com",
+  "resalewebsite.unusualsuspectsclothing.workers.dev"
 ]);
 const ALLOWED_HOSTS = [
   "depop.com", "grailed.com", "poshmark.com", "jp.mercari.com", "zenmarket.jp",
@@ -27,16 +25,15 @@ function safeUrl(value) {
   if (!ALLOWED_HOSTS.some((domain) => hostnameMatches(hostname, domain))) {
     throw new Error("That marketplace host is not enabled in the Browser Bridge.");
   }
+  url.hash = "";
   return url;
 }
 
 function senderAllowed(sender) {
   try {
     const url = new URL(sender?.url || sender?.tab?.url || "");
-    if (url.protocol === "http:" && (url.hostname === "localhost" || url.hostname === "127.0.0.1")) {
-      return true;
-    }
-    return APP_ORIGINS.has(url.origin);
+    if (url.protocol === "http:" && (url.hostname === "localhost" || url.hostname === "127.0.0.1")) return true;
+    return url.protocol === "https:" && APP_HOSTS.has(url.hostname.toLowerCase());
   } catch {
     return false;
   }
@@ -73,7 +70,13 @@ function tabsGet(tabId) {
 }
 
 function tabsUpdate(tabId, updateProperties) {
-  return new Promise((resolve) => chrome.tabs.update(tabId, updateProperties, resolve));
+  return new Promise((resolve, reject) => {
+    chrome.tabs.update(tabId, updateProperties, (tab) => {
+      const error = chrome.runtime.lastError;
+      if (error || !tab) reject(new Error(error?.message || "Could not update marketplace tab."));
+      else resolve(tab);
+    });
+  });
 }
 
 function tabsRemove(tabId) {
@@ -90,7 +93,7 @@ function sendTabMessage(tabId, message) {
   });
 }
 
-async function waitForTabComplete(tabId, timeoutMs = 22_000) {
+async function waitForTabComplete(tabId, timeoutMs = 30_000) {
   const current = await tabsGet(tabId);
   if (current.status === "complete") return current;
   return await new Promise((resolve, reject) => {
@@ -115,9 +118,7 @@ async function sessionFetch(url) {
       credentials: "include",
       redirect: "follow",
       cache: "no-store",
-      headers: {
-        Accept: "application/json,text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.7"
-      }
+      headers: { Accept: "application/json,text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.7" }
     });
     const body = (await response.text()).slice(0, MAX_BODY_CHARS);
     return {
@@ -144,24 +145,34 @@ async function sessionFetch(url) {
 
 async function findReusableTab(url) {
   const tabs = await tabsQuery({});
-  return tabs.find((tab) => {
-    try {
-      const current = new URL(tab.url || "");
-      return current.toString() === url.toString() && tab.id;
-    } catch {
-      return false;
-    }
-  });
+  const exact = tabs.find((tab) => tab.id && tab.url === url.toString());
+  if (exact) return exact;
+  if (hostnameMatches(url.hostname.toLowerCase(), "depop.com")) {
+    return tabs.find((tab) => {
+      try {
+        const current = new URL(tab.url || "");
+        return tab.id && hostnameMatches(current.hostname.toLowerCase(), "depop.com")
+          && /^\/(?:search|brands|theme)\/?/i.test(current.pathname);
+      } catch {
+        return false;
+      }
+    });
+  }
+  return undefined;
 }
 
-async function captureThroughTab(url) {
+async function captureThroughTab(url, options = {}) {
+  const interactive = Boolean(options.interactive);
+  const closeOnSuccess = options.closeOnSuccess !== false;
+  const [previousActive] = interactive ? await tabsQuery({ active: true, currentWindow: true }) : [];
   let tab = await findReusableTab(url);
   let created = false;
+
   if (!tab?.id) {
-    tab = await tabsCreate({ url: url.toString(), active: false });
+    tab = await tabsCreate({ url: url.toString(), active: interactive });
     created = true;
-  } else if (tab.url !== url.toString()) {
-    tab = await tabsUpdate(tab.id, { url: url.toString(), active: false });
+  } else {
+    tab = await tabsUpdate(tab.id, { url: url.toString(), active: interactive });
   }
 
   const tabId = tab.id;
@@ -169,42 +180,66 @@ async function captureThroughTab(url) {
     await waitForTabComplete(tabId);
     let captured;
     let lastError;
-    for (let attempt = 0; attempt < 5; attempt += 1) {
+    for (let attempt = 0; attempt < 10; attempt += 1) {
       try {
         captured = await sendTabMessage(tabId, { type: "RML_CAPTURE_PAGE", url: url.toString() });
         if (captured) break;
       } catch (error) {
         lastError = error;
-        await new Promise((resolve) => setTimeout(resolve, 450));
+        await new Promise((resolve) => setTimeout(resolve, 500));
       }
     }
     if (!captured) throw lastError || new Error("Marketplace capture script did not respond.");
 
     if (captured.requiresUserAction) {
       await tabsUpdate(tabId, { active: true });
-      return { ...captured, tabId, createdTab: created };
+      return { ...captured, tabId, createdTab: created, transport: "interactive-tab" };
     }
-    if (created) await tabsRemove(tabId);
-    return { ...captured, tabId, createdTab: created };
+
+    if (created && closeOnSuccess) await tabsRemove(tabId);
+    if (interactive && previousActive?.id && previousActive.id !== tabId) {
+      try { await tabsUpdate(previousActive.id, { active: true }); } catch { /* tab may have closed */ }
+    }
+    return { ...captured, tabId, createdTab: created, transport: interactive ? "interactive-tab" : "tab-capture" };
   } catch (error) {
     if (created) await tabsRemove(tabId);
+    if (interactive && previousActive?.id && previousActive.id !== tabId) {
+      try { await tabsUpdate(previousActive.id, { active: true }); } catch { /* tab may have closed */ }
+    }
     throw error;
   }
 }
 
 async function fetchWithRecovery(url) {
+  const hostname = url.hostname.toLowerCase();
+
+  // Depop is intentionally tab-only. Extension/background fetches and Cloudflare
+  // egress were the source of the recurring 403 page. A visible normal tab uses
+  // the same navigation/session path as opening Depop by hand.
+  if (hostnameMatches(hostname, "depop.com")) {
+    return captureThroughTab(url, { interactive: true, closeOnSuccess: true });
+  }
+
+  // Grailed and Poshmark also work more reliably from rendered page state.
+  if (hostnameMatches(hostname, "grailed.com") || hostnameMatches(hostname, "poshmark.com")) {
+    try {
+      const captured = await captureThroughTab(url, { interactive: false, closeOnSuccess: true });
+      if (captured.body?.trim() || captured.requiresUserAction) return captured;
+    } catch {
+      // Retain the session-aware request as a secondary fallback for these two.
+    }
+  }
+
   const direct = await sessionFetch(url);
   if (direct.ok && direct.body.trim()) return direct;
   try {
-    const captured = await captureThroughTab(url);
-    if (captured.body?.trim()) return captured;
-    return {
-      ...direct,
-      error: captured.error || direct.error || `Marketplace returned HTTP ${direct.status || 0}.`
-    };
+    const captured = await captureThroughTab(url, { interactive: false, closeOnSuccess: true });
+    if (captured.body?.trim() || captured.requiresUserAction) return captured;
+    return { ...direct, error: captured.error || direct.error || `Marketplace returned HTTP ${direct.status || 0}.` };
   } catch (error) {
     return {
       ...direct,
+      body: "",
       error: [direct.error, error instanceof Error ? error.message : "Browser-tab capture failed."]
         .filter(Boolean).join("; ") || `Marketplace returned HTTP ${direct.status || 0}.`
     };
@@ -244,6 +279,7 @@ if (!globalThis[INSTALL_KEY]) {
         ok: false,
         status: 0,
         url: url.toString(),
+        body: "",
         error: error instanceof Error ? error.message : "Browser Bridge request failed."
       }));
     return true;

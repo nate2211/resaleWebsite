@@ -7,7 +7,7 @@ export async function POST() {
     listings: [],
     searches: [],
     frontendOnly: true,
-    workerRevision: "market-search-browser-bridge-production-v18",
+    workerRevision: "market-search-depop-tab-capture-production-v19",
   }, {
     status: 410,
     headers: { "cache-control": "no-store" },

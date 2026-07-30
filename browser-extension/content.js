@@ -1,5 +1,5 @@
 const SOURCE = "resalemasterlab-browser-bridge";
-const VERSION = "2.0.0";
+const VERSION = "3.0.0";
 const INSTALL_KEY = "__RML_BROWSER_BRIDGE_CONTENT_INSTALLED__";
 
 function announceReady() {
@@ -9,7 +9,7 @@ function announceReady() {
     type: "RML_BRIDGE_READY",
     source: SOURCE,
     version: VERSION,
-    capabilities: ["session-fetch", "tab-capture", "challenge-recovery"]
+    capabilities: ["interactive-depop-tab", "rendered-dom-capture", "challenge-recovery"]
   }, "*");
 }
 

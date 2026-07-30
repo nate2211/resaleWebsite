@@ -1,6 +1,6 @@
 {
   "name": "resalemasterlab",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "private": true,
   "engines": {
     "node": ">=22.13.0"
@@ -56,5 +56,5 @@
     "wrangler": "4.92.0"
   },
   "type": "module",
-  "description": "ResaleMasterLab with Browser Bridge 2.0 session-aware marketplace capture and graceful Depop/Grailed recovery."
+  "description": "ResaleMasterLab with Browser Bridge 3.0 interactive Depop tab capture and no Depop cloud-fetch fallback."
 }

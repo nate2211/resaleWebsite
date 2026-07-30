@@ -1,93 +1,57 @@
-# ResaleMasterLab marketplace Browser Bridge recovery v18
+# ResaleMasterLab Depop rendered-tab recovery v19
 
-This release keeps every production feature from v16 and corrects the marketplace selector placement, Depop product-page extraction, and the exact ZenMarket search and product-link formats supplied for Mercari Japan, JDirectItems Auction, Rakuten, and Rakuten Rakuma.
+This release preserves the complete ResaleMasterLab feature set from the prior marketplace builds while restoring Depop to the normal public-page workflow that previously produced usable listing cards.
 
 Production domain: `https://resalemasterlab.cloud-cord.com`
 
-## v18 changes
+## Depop fix in v19
 
-- Browser Bridge 2.0 now uses the normal Chrome/Edge session before cloud relay fallbacks for Depop, Grailed, and Poshmark.
-- A rendered-tab capture path extracts official listing links, images, prices, JSON-LD, and hydrated DOM state.
-- 403 and human-verification pages become a guided retry state instead of raw denial HTML.
-- Grailed public-index outages no longer replace page-captured cards or leak the partial response object into marketplace status text.
-- The Browse page includes a live bridge connection container.
+Depop is now **browser-tab-only**:
 
-### Marketplace selector
+- ResaleMasterLab opens the normal URL `https://www.depop.com/search/?q=<query>&page=<page>` in a visible Chrome or Edge tab.
+- The extension waits for the real page to hydrate, performs a bounded scroll to load listing cards, and captures rendered `/products/` links, text, prices, images, JSON-LD, React/Next state, and canonical metadata.
+- Depop is never requested through the Cloudflare `/api/listings` relay.
+- Depop is never requested with an extension background `fetch`.
+- Depop product-page hydration is disabled during search, preventing one search from opening several extra tabs or generating repeated denial requests.
+- The bridge timeout is long enough for a normal tab load and client-side hydration.
+- A denial or verification page is returned as a clean retry message; the raw `Sorry, not authorized` HTML is not passed into the results parser.
 
-- The marketplace selection panel now appears directly below the Depop, Grailed, and Poshmark cards.
-- The panel uses a natural-width flex layout rather than a rigid multi-column grid.
-- Helper text keeps normal word spacing and never uses forced word breaking or hyphenation.
-- Desktop buttons remain compact; tablet and phone layouts stack without stretched text or blank space.
-- The default-market checkboxes wrap as natural pills.
+The earlier alternate public URLs remain available to the parser and source-link tools:
 
-### Depop
-
-Depop continues to start with its normal public pages:
-
-- `https://www.depop.com/search/?q=<query>&page=<page>`
 - `https://www.depop.com/brands/<slug>/?page=<page>`
 - `https://www.depop.com/theme/<slug>/?page=<page>`
 - `https://www.depop.com/products/<listing-slug>/`
 
-The new dedicated product-page parser reads normal HTML, embedded React/JSON, Open Graph fields, JSON-LD, and readable page-source text. It preserves:
+The main live search uses one normal search URL per request to avoid repeated navigation.
 
-- Canonical `/products/` URL
-- First-party `media-photos.depop.com` image
-- Title and description
-- Published USD price
-- Size
-- Condition
-- Brand
-- Seller context
+## Grailed recovery
 
-A `view-source:` prefix is stripped when a user pastes one, but runtime requests use the normal HTTPS product URL.
+- Rendered Browser Bridge cards remain the primary Grailed source.
+- The public-index fallback runs only when rendered page capture found no cards.
+- Empty partial objects such as `{ hits: [], partial: true }` are not used as listing results or shown as raw status text.
 
-### ZenMarket marketplace searches
+## Features retained
 
-Search terms are joined with the encoded plus separator expected by the supplied ZenMarket searches. The exact store-filter searches are:
+- Depop, Grailed, and Poshmark default marketplace cards
+- Collapsible international marketplace panel
+- Mercari Japan, JDirectItems Auction, Rakuten, Rakuten Rakuma, and Bunjang
+- Exact ZenMarket store IDs 27, 28, 0, and 25
+- AI Search, favorites, watchlist, compare, import, authenticity, engagement, fee/profit analysis, and local browser AI
+- Thrift Check and Listing Template
+- Sticky responsive navigation, SEO pages, sitemap, robots, manifest, icons, screenshots, Open Graph, and JSON-LD
+- Bounded request queues and partial-failure handling
 
-- Mercari Japan: `stores=27`
-- JDirectItems Auction: `stores=28`
-- Rakuten: `stores=0`
-- Rakuten Rakuma: `stores=25`
+## Install Browser Bridge 3.0
 
-All use:
+1. Extract the project.
+2. Open `chrome://extensions` or `edge://extensions`.
+3. Enable **Developer mode**.
+4. Remove the older ResaleMasterLab Browser Bridge.
+5. Choose **Load unpacked** and select the project's `browser-extension` folder.
+6. Reload ResaleMasterLab until the Browse page says **Browser Bridge connected**.
+7. Run a Depop search. A normal Depop tab briefly opens while results render and are captured.
 
-```text
-https://zenmarket.jp/en/search.aspx?q=<encoded-query>&p=<page>&searchMode=custom&stores=<store-id>
-```
-
-Result cards normalize to ZenMarket's normal root product routes:
-
-```text
-https://zenmarket.jp/mercariproduct.aspx?itemCode=...
-https://zenmarket.jp/auction.aspx?itemCode=...
-https://zenmarket.jp/rakutenproduct.aspx?itemCode=...
-https://zenmarket.jp/rakumaproduct.aspx?itemCode=...
-```
-
-The parser retains `q`, `p`, `pos`, and `cs` when they are present in the source link. It accepts both root and `/en/` source links, nested ASP.NET `.d` payloads, `Items` arrays, and serialized `ItemCode` records, then emits one canonical root product URL.
-
-### Bounded production requests
-
-- All-market mode continues to use two marketplaces per outer batch.
-- At most three same-origin relay requests are active globally.
-- Only the literal query is used when six or more markets are selected.
-- ZenMarket compact catalog attempts are bounded to three endpoints.
-- Page-source fallbacks run sequentially inside each marketplace.
-- Product-page enrichment is limited to one listing per marketplace in all-market mode.
-- Failed relays return a partial HTTP 200 envelope so the frontend can continue to the browser bridge without console 502 floods.
-- No Cloudflare Browser Run binding is configured.
-
-## Existing production features retained
-
-- Complete sticky responsive navbar on every page
-- Thrift Check with image upload/camera, profit math, sold analysis, optional vision, and optional local AI
-- Listing Template with local image captioning, local text generation, and market-bounded pricing
-- Depop, Grailed, Poshmark, Mercari Japan, JDirectItems, Rakuten, Rakuma, Bunjang, Goofish/Superbuy compatibility, and AI Search
-- Grailed active/sold public-index search and nested image extraction
-- Nonfatal engagement analysis
-- Sitemap, robots, manifest, icons, screenshots, canonical metadata, Open Graph, Twitter cards, and JSON-LD
+If Depop itself displays a verification page in that normal tab, complete it there and run the search again. The project does not bypass marketplace verification or account controls.
 
 ## Run and deploy
 
@@ -102,6 +66,9 @@ npm run check:production
 
 Cloudflare Git builds should use Node 22, build command `npm run build:windows`, and deploy command `npm run deploy`.
 
-## Limitations
+## Validation
 
-Marketplace pages can change or block datacenter traffic. The included browser bridge remains the fallback when an official page blocks the lightweight Cloudflare relay. Results are public planning evidence and should be verified on the original listing before purchase or publication.
+- 45 Node project tests pass.
+- Browser extension JavaScript syntax checks pass.
+- The changed TypeScript marketplace and relay files pass standalone TypeScript checking with `ES2022`, `DOM`, and `DOM.Iterable` libraries.
+- A complete dependency install could not be run in this environment because its package mirror returned 404 for `zod-validation-error@4.0.2`; the public package lock remains unchanged for normal npm installs.
