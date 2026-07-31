@@ -47,11 +47,11 @@ for (const route of ["/thrift-check", "/listing-template", "/manifest.webmanifes
 const healthResult = await read("/api/health");
 if (!healthResult.response.ok) throw new Error(`/api/health returned HTTP ${healthResult.response.status}.`);
 const health = JSON.parse(healthResult.text);
-if (health.revision !== "market-search-frontend-api-depop-recovery-v20") {
+if (health.revision !== "market-search-depop-parallel-recovery-v21") {
   throw new Error(`The domain is serving an older revision: ${health.revision || "unknown"}.`);
 }
-if (health.marketplaceRequests !== "frontend-api-page-source-recovery"
-  || health.cloudflareMarketplaceFetches !== "official-page-then-depop-readable-indexed-recovery") {
+if (health.marketplaceRequests !== "frontend-api-depop-parallel-recovery"
+  || health.cloudflareMarketplaceFetches !== "parallel-depop-ssr-api-reader-index-recovery") {
   throw new Error("The deployed version is not using the frontend marketplace API recovery flow.");
 }
 
@@ -69,10 +69,10 @@ if (!upstreamStatus || !/depop\.com/i.test(finalUrl) || relayResult.text.length 
 if (/sorry,? not authorized|403 forbidden/i.test(relayResult.text)) {
   throw new Error("The marketplace API exposed raw Depop forbidden HTML instead of applying recovery.");
 }
-if (!/frontend-api-page-source-recovery/i.test(relayResult.response.headers.get("x-rml-marketplace-mode") || "")) {
-  throw new Error("The marketplace endpoint is not serving the v20 frontend-API recovery transport.");
+if (!/frontend-api-depop-parallel-recovery/i.test(relayResult.response.headers.get("x-rml-marketplace-mode") || "")) {
+  throw new Error("The marketplace endpoint is not serving the v21 parallel Depop recovery transport.");
 }
-if (!/^(official|depop-reader|depop-index|depop-empty)$/.test(recoveryTransport)) {
+if (!/^(official|depop-api|depop-reader|depop-index|depop-empty)$/.test(recoveryTransport)) {
   throw new Error(`Unexpected Depop recovery transport: ${recoveryTransport || "missing"}.`);
 }
 

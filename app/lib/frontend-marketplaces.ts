@@ -56,6 +56,7 @@ type TextResponse = {
 
 const MAX_RESPONSE_CHARS = 5_500_000;
 const DIRECT_TIMEOUT_MS = 12_000;
+const DEPOP_FRONTEND_API_TIMEOUT_MS = 30_000;
 const READER_TIMEOUT_MS = 20_000;
 const JINA_KEY_STORAGE = "rml:jina-reader-key";
 const MARKETPLACE_RELAY_CONCURRENCY = 3;
@@ -232,7 +233,14 @@ function mergeAbortSignals(primary: AbortSignal | undefined, timeoutMs: number) 
 
 async function frontendApiFetchText(url: string, signal?: AbortSignal): Promise<TextResponse> {
   return withMarketplaceRelaySlot(async () => {
-    const merged = mergeAbortSignals(signal, DIRECT_TIMEOUT_MS + 5_000);
+    let timeoutMs = DIRECT_TIMEOUT_MS + 5_000;
+    try {
+      const hostname = new URL(url).hostname.toLowerCase();
+      if (hostname === "depop.com" || hostname.endsWith(".depop.com")) {
+        timeoutMs = DEPOP_FRONTEND_API_TIMEOUT_MS;
+      }
+    } catch { /* URL validation happens in the API route. */ }
+    const merged = mergeAbortSignals(signal, timeoutMs);
     try {
     const response = await fetch(`/api/listings?source=${encodeURIComponent(url)}`, {
       method: "GET",
@@ -253,8 +261,9 @@ async function frontendApiFetchText(url: string, signal?: AbortSignal): Promise<
     }
     const upstreamStatus = Number(response.headers.get("x-rml-upstream-status") || "200") || 0;
     const recoveryTransport = response.headers.get("x-rml-recovery-transport") || "official";
+    const emptyRecovery = recoveryTransport === "depop-empty";
     return {
-      ok: upstreamStatus >= 200 && upstreamStatus < 400,
+      ok: !emptyRecovery && upstreamStatus >= 200 && upstreamStatus < 400,
       status: upstreamStatus,
       url: response.headers.get("x-rml-final-url") || url,
       contentType: response.headers.get("x-rml-upstream-content-type")
@@ -1301,8 +1310,8 @@ export async function searchMarketplaceFrontend(input: {
     marketplace,
     status: "unavailable",
     message: marketplace === "Depop"
-      ? (rejected.find((entry) => /authorized|forbidden|blocked|challenge|reader|indexed/i.test(entry))
-          || "Depop did not expose readable cards through the frontend API. ResaleMasterLab tried the exact search page, then brand/theme and readable indexed product-page fallbacks; open the live search link to verify the current results.")
+      ? (rejected.find((entry) => /timeout|network|reader|indexed/i.test(entry))
+          || "No current Depop product cards matched this search after checking the live page, public catalog data, readable page content, and indexed product links. Open the live search link to review the query directly.")
       : `No readable ${marketplace} cards were found through the frontend marketplace API or official page-source fallbacks.`,
     sourceUrl,
     listings: [],

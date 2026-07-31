@@ -26,6 +26,7 @@ test("frontend sends Depop through the same-origin marketplace API without an ex
   assert.match(client, /\/api\/listings\?source=/);
   assert.match(client, /including Depop/);
   assert.match(client, /const relayed = await frontendApiFetchText/);
+  assert.match(client, /DEPOP_FRONTEND_API_TIMEOUT_MS = 30_000/);
   assert.doesNotMatch(client, /__RML_EXTENSION_FETCH__|RML_FETCH_REQUEST|extensionFetchText|Browser Bridge/);
 });
 
@@ -35,7 +36,10 @@ test("Depop API recovery is bounded and discards challenge HTML", async () => {
   assert.match(route, /function depopChallenge/);
   assert.match(route, /fetchDepopReader/);
   assert.match(route, /fetchIndexedDepopLinks/);
-  assert.match(route, /MAX_INDEXED_DEPOP_LINKS = 12/);
+  assert.match(route, /Promise\.any\(tasks\)/);
+  assert.match(route, /fetchDepopApi/);
+  assert.match(route, /x-with-links-summary/);
+  assert.match(route, /MAX_INDEXED_DEPOP_LINKS = 24/);
   assert.match(route, /recovery: "depop-reader"/);
   assert.match(route, /recovery: "depop-index"/);
   assert.doesNotMatch(route, /browser-tab-only|chrome\.|BrowserRun/);
@@ -43,7 +47,7 @@ test("Depop API recovery is bounded and discards challenge HTML", async () => {
 
 test("a mocked Depop 403 is replaced by readable product cards", async (t) => {
   const found = await compiler(t); if (!found) return;
-  const outDir = await mkdtemp(join(tmpdir(), "rml-depop-api-v20-"));
+  const outDir = await mkdtemp(join(tmpdir(), "rml-depop-api-v21-"));
   const originalFetch = globalThis.fetch;
   try {
     const input = fileURLToPath(new URL("../app/api/listings/route.ts", import.meta.url));
@@ -57,8 +61,17 @@ test("a mocked Depop 403 is replaced by readable product cards", async (t) => {
       if (value.startsWith("https://www.depop.com/")) {
         return new Response("Sorry, not authorized. 403 Forbidden", { status: 403, headers: { "content-type": "text/html" } });
       }
+      if (value.startsWith("https://webapi.depop.com/")) {
+        return new Response('{"products":[]}', { status: 403, headers: { "content-type": "application/json" } });
+      }
       if (value.startsWith("https://r.jina.ai/")) {
-        return new Response("1. [Supreme Box Logo Tee](https://www.depop.com/products/seller-supreme-box-logo-tee/)\nM\n$55.00", { status: 200, headers: { "content-type": "text/plain" } });
+        return new Response(JSON.stringify({ data: {
+          content: "Supreme Box Logo Tee\nM\n$55.00",
+          links: [{ text: "Supreme Box Logo Tee", url: "https://www.depop.com/products/seller-supreme-box-logo-tee/" }],
+        } }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      if (value.includes("bing.com/search") || value.includes("duckduckgo.com/html")) {
+        return new Response("<html><body>No indexed results</body></html>", { status: 200, headers: { "content-type": "text/html" } });
       }
       throw new Error(`Unexpected URL ${value}`);
     };
@@ -70,7 +83,15 @@ test("a mocked Depop 403 is replaced by readable product cards", async (t) => {
     assert.equal(response.headers.get("x-rml-recovery-transport"), "depop-reader");
     assert.match(body, /depop\.com\/products\/seller-supreme/);
     assert.doesNotMatch(body, /not authorized|403 forbidden/i);
-    assert.equal(calls, 2);
+    assert.ok(calls >= 3);
+
+    globalThis.fetch = async () => { throw new Error("all public sources unavailable"); };
+    const emptyResponse = await route.GET(new Request(`https://resalemasterlab.cloud-cord.com/api/listings?source=${encodeURIComponent(sourceUrl)}`));
+    const emptyBody = await emptyResponse.text();
+    assert.equal(emptyResponse.status, 200);
+    assert.equal(emptyResponse.headers.get("x-rml-recovery-transport"), "depop-empty");
+    assert.deepEqual(JSON.parse(emptyBody).products, []);
+    assert.doesNotMatch(emptyBody, /public page source was unavailable/i);
   } finally {
     globalThis.fetch = originalFetch;
     await rm(outDir, { recursive: true, force: true });
@@ -102,8 +123,8 @@ test("the Browser Bridge extension was removed", async () => {
 test("health and deployment identify frontend-API recovery", async () => {
   const health = await source("app/api/health/route.ts");
   const wrangler = await source("wrangler.jsonc");
-  assert.match(health, /market-search-frontend-api-depop-recovery-v20/);
-  assert.match(health, /frontend-api-page-source-recovery/);
-  assert.match(wrangler, /frontend-api-page-source-recovery/);
+  assert.match(health, /market-search-depop-parallel-recovery-v21/);
+  assert.match(health, /frontend-api-depop-parallel-recovery/);
+  assert.match(wrangler, /frontend-api-depop-parallel-recovery/);
   assert.doesNotMatch(wrangler, /"browser"\s*:/i);
 });

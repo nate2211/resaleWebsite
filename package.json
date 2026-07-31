@@ -1,6 +1,6 @@
 {
   "name": "resalemasterlab",
-  "version": "1.7.0",
+  "version": "1.8.0",
   "private": true,
   "engines": {
     "node": ">=22.13.0"
@@ -56,5 +56,5 @@
     "wrangler": "4.92.0"
   },
   "type": "module",
-  "description": "ResaleMasterLab with first-party frontend API Depop search, readable-page recovery, indexed product fallbacks, and no browser extension."
+  "description": "ResaleMasterLab with parallel first-party Depop recovery across SSR page source, public catalog data, readable-page extraction, and indexed product links; no browser extension."
 }

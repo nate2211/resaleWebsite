@@ -7,7 +7,7 @@ export async function POST() {
     listings: [],
     searches: [],
     frontendOnly: true,
-    workerRevision: "market-search-frontend-api-depop-recovery-v20",
+    workerRevision: "market-search-depop-parallel-recovery-v21",
   }, {
     status: 410,
     headers: { "cache-control": "no-store" },

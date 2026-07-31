@@ -1,48 +1,30 @@
-# ResaleMasterLab frontend-API Depop recovery v20
+# ResaleMasterLab Depop parallel recovery v21
 
-This release removes the Browser Bridge extension and restores Depop to the first-party ResaleMasterLab frontend/API flow used by the earlier working marketplace builds.
+This build removes the Browser Bridge extension and keeps Depop inside the same-origin frontend API.
 
-Production domain: `https://resalemasterlab.cloud-cord.com`
+## Depop request flow
 
-## Depop request order
+`/api/listings` races bounded public sources and returns the first source containing real product evidence:
 
-For each Depop search, the frontend tries the normal public marketplace pages in this order:
+1. Depop search, brand, theme, or product HTML, including the `/us/` route variant.
+2. Depop public catalog v3/v2 responses when they are readable.
+3. Jina Reader page extraction with complete link summaries.
+4. Publicly indexed Depop product URLs from bounded search-index responses.
 
-1. `https://www.depop.com/search/?q=<query>&page=<page>`
-2. `https://www.depop.com/brands/<slug>/?page=<page>`
-3. `https://www.depop.com/theme/<slug>/?page=<page>`
+Raw 401, 403, 429, Cloudflare challenge, and “Sorry, not authorized” pages are discarded. Empty recovery returns a clean JSON product array, never a raw unavailable-page-source error message.
 
-Every URL is requested through the same-origin `/api/listings` route. No Chrome/Edge extension, injected page script, background tab, or browser message bridge is included or used.
+The Depop frontend API timeout is 30 seconds; other marketplaces keep their shorter timeout. Search results are hydrated through a bounded number of product-page requests to fill missing price, image, size, condition, seller, and description fields.
 
-The API applies bounded recovery instead of returning raw denial HTML:
+## Run
 
-- official Depop HTML/React page source first;
-- readable Markdown page source when the origin returns a challenge or no cards;
-- indexed public `/products/` links for search/brand/theme pages when both page-source paths are empty;
-- up to four product pages hydrated through the same API to recover missing title, image, price, size, condition, brand, seller, and description fields.
-
-Raw `Sorry, not authorized` and `403 Forbidden` pages are detected and discarded before the frontend parser sees them.
-
-## Other retained features
-
-- Depop, Grailed, and Poshmark selected by default
-- Grailed public page-source plus bounded public-index fallback
-- International marketplace panel with Mercari Japan, JDirectItems Auction, Rakuten, Rakuten Rakuma, and Bunjang
-- ZenMarket store IDs 27, 28, 0, and 25
-- AI Search, favorites, watchlist, compare, import, authenticity, engagement, fee/profit analysis, and local browser AI
-- Thrift Check and Listing Template
-- Sticky responsive navigation, SEO pages, sitemap, robots, manifest, icons, Open Graph, and JSON-LD
-- Bounded request queues and partial-failure handling
-
-## Run and deploy
-
-```powershell
-npm ci
-npm test
-npm run seo:validate
-npm run build:windows
-npm run deploy
-npm run check:production
+```bash
+npm install
+npm run dev
 ```
 
-Cloudflare Git builds should use Node 22, build command `npm run build:windows`, and deploy command `npm run deploy`.
+## Validate
+
+```bash
+npm test
+npm run seo:validate
+```

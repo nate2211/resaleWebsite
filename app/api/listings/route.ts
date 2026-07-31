@@ -1,13 +1,15 @@
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
-const WORKER_REVISION = "market-search-frontend-api-depop-recovery-v20";
+const WORKER_REVISION = "market-search-depop-parallel-recovery-v21";
 const MAX_BODY_BYTES = 5_500_000;
 const UPSTREAM_TIMEOUT_MS = 15_000;
+const DEPOP_ORIGIN_TIMEOUT_MS = 9_000;
+const DEPOP_API_TIMEOUT_MS = 7_000;
 const READER_TIMEOUT_MS = 20_000;
-const INDEX_TIMEOUT_MS = 12_000;
+const INDEX_TIMEOUT_MS = 10_000;
 const MAX_REDIRECTS = 3;
-const MAX_INDEXED_DEPOP_LINKS = 12;
+const MAX_INDEXED_DEPOP_LINKS = 24;
 
 const ALLOWED_MARKETPLACE_HOSTS = [
   "depop.com",
@@ -27,6 +29,13 @@ const ALLOWED_MARKETPLACE_HOSTS = [
   "2.taobao.com",
 ] as const;
 
+type RecoveryTransport =
+  | "official"
+  | "depop-api"
+  | "depop-reader"
+  | "depop-index"
+  | "depop-empty";
+
 function hostnameMatches(hostname: string, domain: string) {
   return hostname === domain || hostname.endsWith(`.${domain}`);
 }
@@ -36,7 +45,7 @@ function isDepopUrl(url: URL) {
 }
 
 function isDepopProductUrl(url: URL) {
-  return isDepopUrl(url) && /^\/products\/[a-z0-9_-]+\/?$/i.test(url.pathname);
+  return isDepopUrl(url) && /^\/(?:[a-z]{2}\/)?products\/[a-z0-9_-]+\/?$/i.test(url.pathname);
 }
 
 function parseAllowedUrl(value: string) {
@@ -57,13 +66,22 @@ function parseAllowedUrl(value: string) {
   return parsed;
 }
 
+function depopSourceFromRequest(requestUrl: URL) {
+  const marketplace = (requestUrl.searchParams.get("marketplace") || "").trim().toLowerCase();
+  if (marketplace !== "depop") return "";
+  const query = (requestUrl.searchParams.get("q") || requestUrl.searchParams.get("query") || "").trim();
+  if (!query) return "";
+  const page = Math.max(0, Number.parseInt(requestUrl.searchParams.get("page") || "0", 10) || 0) + 1;
+  return `https://www.depop.com/us/search/?q=${encodeURIComponent(query)}&page=${page}`;
+}
+
 function errorJson(message: string, status: number) {
   return Response.json({ error: message, workerRevision: WORKER_REVISION }, {
     status,
     headers: {
       "cache-control": "no-store, max-age=0",
       "x-rml-worker-revision": WORKER_REVISION,
-      "x-rml-marketplace-mode": "frontend-api-page-source-recovery",
+      "x-rml-marketplace-mode": "frontend-api-depop-parallel-recovery",
       "x-rml-relay-error": "1",
     },
   });
@@ -134,10 +152,10 @@ async function timedFetch(url: string | URL, timeoutMs: number, requestSignal: A
   }
 }
 
-async function fetchMarketplacePage(initialUrl: URL, requestSignal: AbortSignal) {
+async function fetchMarketplacePage(initialUrl: URL, requestSignal: AbortSignal, timeoutMs = UPSTREAM_TIMEOUT_MS) {
   let current = initialUrl;
   for (let redirectCount = 0; redirectCount <= MAX_REDIRECTS; redirectCount += 1) {
-    const response = await timedFetch(current, UPSTREAM_TIMEOUT_MS, requestSignal, {
+    const response = await timedFetch(current, timeoutMs, requestSignal, {
       method: "GET",
       redirect: "manual",
       cache: "no-store",
@@ -154,24 +172,67 @@ async function fetchMarketplacePage(initialUrl: URL, requestSignal: AbortSignal)
   throw new Error("Marketplace redirect limit exceeded.");
 }
 
+function normalizeEscapedText(body: string) {
+  return body
+    .replaceAll("\\u002F", "/")
+    .replaceAll("\\u0026", "&")
+    .replaceAll("\\/", "/")
+    .replaceAll("&amp;", "&")
+    .replaceAll("&#x2F;", "/")
+    .replaceAll("&#47;", "/");
+}
+
 function depopChallenge(status: number, body: string) {
   if ([401, 403, 429].includes(status)) return true;
   const sample = body.slice(0, 180_000);
   return /sorry,? not authorized|403 forbidden|you (?:have been|were) blocked|cf-chl-|cloudflare ray id|checking your browser|verify you are human|access denied/i.test(sample);
 }
 
+function depopProductUrls(body: string) {
+  const normalized = normalizeEscapedText(body);
+  const links = normalized.match(/(?:https?:\/\/(?:www\.)?depop\.com)?\/(?:[a-z]{2}\/)?products\/[a-z0-9_-]+\/?/gi) || [];
+  const output = new Set<string>();
+  for (const value of links) {
+    const url = canonicalDepopProduct(value);
+    if (url && !/\/products\/create\//i.test(url)) output.add(url);
+  }
+  return [...output];
+}
+
 function depopProductCount(body: string) {
-  const links = body.match(/(?:https?:\/\/(?:www\.)?depop\.com)?\/products\/[a-z0-9_-]+\/?/gi) || [];
-  return new Set(links.map((value) => value.toLowerCase().replace(/[?#].*$/, ""))).size;
+  return depopProductUrls(body).length;
 }
 
 function depopProductPageEvidence(body: string) {
-  const sample = body.slice(0, 1_200_000);
-  return /(?:property|name)=["'](?:og:title|og:image|product:price:amount)["']|media-photos\.depop\.com|self\.__next_f\.push|"(?:product|item|listing|price|seller|username)"\s*:/i.test(sample);
+  const sample = normalizeEscapedText(body).slice(0, 1_500_000);
+  return /(?:property|name)=["'](?:og:title|og:image|product:price:amount)["']|media-photos\.depop\.com|self\.__next_f\.push|"(?:product|item|listing|price|seller|username)"\s*:|(?:^|\n)Size\s+[^\n]+|(?:US\$|\$)\s*\d/im.test(sample);
 }
 
 function depopReaderUrl(url: URL) {
   return `https://r.jina.ai/${url.toString()}`;
+}
+
+function readerPayloadText(raw: string) {
+  const normalized = normalizeEscapedText(raw);
+  try {
+    const payload = JSON.parse(raw) as Record<string, unknown>;
+    const root = payload.data && typeof payload.data === "object"
+      ? payload.data as Record<string, unknown>
+      : payload;
+    const sections: string[] = [];
+    for (const key of ["title", "description", "content", "text", "markdown"]) {
+      const value = root[key];
+      if (typeof value === "string" && value.trim()) sections.push(value.trim());
+    }
+    for (const key of ["links", "images"]) {
+      const value = root[key];
+      if (value !== undefined) sections.push(JSON.stringify(value));
+    }
+    if (sections.length) return normalizeEscapedText(`${sections.join("\n\n")}\n\n${normalized}`);
+  } catch {
+    // Plain Markdown/text responses remain valid reader output.
+  }
+  return normalized;
 }
 
 async function fetchDepopReader(url: URL, requestSignal: AbortSignal) {
@@ -180,13 +241,17 @@ async function fetchDepopReader(url: URL, requestSignal: AbortSignal) {
     redirect: "follow",
     cache: "no-store",
     headers: {
-      accept: "text/plain,text/markdown;q=0.9,*/*;q=0.5",
+      accept: "application/json,text/plain,text/markdown;q=0.9,*/*;q=0.5",
       "x-return-format": "markdown",
-      "user-agent": "ResaleMasterLab/2.0 public Depop page reader",
+      "x-with-links-summary": "all",
+      "x-retain-images": "all",
+      "x-timeout": "18",
+      "x-locale": "en-US",
+      "user-agent": "ResaleMasterLab/2.1 public Depop page reader",
     },
   });
-  const { body, truncated } = await readLimitedText(response);
-  return { response, body, truncated };
+  const { body: rawBody, truncated } = await readLimitedText(response);
+  return { response, body: readerPayloadText(rawBody), truncated };
 }
 
 function decodeXml(value: string) {
@@ -202,56 +267,207 @@ function decodeXml(value: string) {
 function depopSearchTerm(url: URL) {
   const explicit = url.searchParams.get("q") || url.searchParams.get("query") || "";
   if (explicit.trim()) return explicit.trim();
-  const match = url.pathname.match(/^\/(?:brands|theme)\/([^/]+)/i);
+  const match = url.pathname.match(/^\/(?:[a-z]{2}\/)?(?:brands|theme)\/([^/]+)/i);
   return match ? decodeURIComponent(match[1]).replace(/[-_]+/g, " ").trim() : "";
 }
 
 function canonicalDepopProduct(value: string) {
   try {
-    const parsed = new URL(decodeXml(value), "https://www.depop.com/");
+    const decoded = decodeXml(value).replace(/^view-source:/i, "");
+    const parsed = new URL(decoded, "https://www.depop.com/");
     if (!isDepopProductUrl(parsed)) return "";
+    const slug = parsed.pathname.match(/\/products\/([a-z0-9_-]+)/i)?.[1] || "";
+    if (!slug || slug.toLowerCase() === "create") return "";
+    parsed.protocol = "https:";
+    parsed.hostname = "www.depop.com";
+    parsed.pathname = `/products/${slug}/`;
     parsed.search = "";
     parsed.hash = "";
-    if (!parsed.pathname.endsWith("/")) parsed.pathname += "/";
     return parsed.toString();
   } catch {
     return "";
   }
 }
 
-async function fetchIndexedDepopLinks(sourceUrl: URL, requestSignal: AbortSignal) {
+function depopSearchApiUrls(sourceUrl: URL) {
   const term = depopSearchTerm(sourceUrl);
-  if (!term) return { body: "", count: 0 };
-  const query = `site:depop.com/products/ ${term}`;
-  const rssUrl = `https://www.bing.com/search?format=rss&q=${encodeURIComponent(query)}`;
-  const response = await timedFetch(rssUrl, INDEX_TIMEOUT_MS, requestSignal, {
+  if (!term) return [];
+  const query = new URLSearchParams({
+    what: term,
+    itemsPerPage: "24",
+    country: "us",
+    currency: "USD",
+    sort: "relevance",
+  });
+  return [
+    `https://webapi.depop.com/api/v3/search/products/?${query}`,
+    `https://webapi.depop.com/api/v2/search/products/?${query}`,
+  ];
+}
+
+function usableDepopApiBody(status: number, body: string) {
+  if (status < 200 || status >= 300 || depopChallenge(status, body)) return false;
+  try {
+    const payload = JSON.parse(body) as { products?: unknown; data?: { products?: unknown } };
+    const products = Array.isArray(payload.products) ? payload.products : payload.data?.products;
+    return Array.isArray(products) && products.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+async function fetchDepopApi(sourceUrl: URL, requestSignal: AbortSignal) {
+  for (const apiUrl of depopSearchApiUrls(sourceUrl)) {
+    const response = await timedFetch(apiUrl, DEPOP_API_TIMEOUT_MS, requestSignal, {
+      method: "GET",
+      redirect: "follow",
+      cache: "no-store",
+      headers: {
+        accept: "application/json",
+        "accept-language": "en-US,en;q=0.9",
+        origin: "https://www.depop.com",
+        referer: sourceUrl.toString(),
+        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36",
+      },
+    });
+    const { body, truncated } = await readLimitedText(response);
+    if (usableDepopApiBody(response.status, body)) {
+      return { response, body, truncated, apiUrl };
+    }
+  }
+  throw new Error("Depop catalog API did not return public products.");
+}
+
+function decodeMaybe(value: string) {
+  let current = decodeXml(value);
+  for (let index = 0; index < 2; index += 1) {
+    try {
+      const decoded = decodeURIComponent(current);
+      if (decoded === current) break;
+      current = decoded;
+    } catch {
+      break;
+    }
+  }
+  return current;
+}
+
+function decodeBingTarget(value: string) {
+  const decoded = decodeMaybe(value);
+  if (/^https?:\/\//i.test(decoded)) return decoded;
+  const encoded = decoded.startsWith("a1") ? decoded.slice(2) : decoded;
+  if (!/^[A-Za-z0-9+/_=-]{16,}$/.test(encoded)) return "";
+  try {
+    const normalized = encoded.replaceAll("-", "+").replaceAll("_", "/");
+    return atob(normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "="));
+  } catch {
+    return "";
+  }
+}
+
+function candidateUrlsFromIndexBody(body: string) {
+  const normalized = normalizeEscapedText(body);
+  const values = new Set<string>();
+  const add = (value: string) => {
+    const canonical = canonicalDepopProduct(decodeMaybe(value));
+    if (canonical) values.add(canonical);
+  };
+
+  for (const match of normalized.matchAll(/https?:\/\/(?:www\.)?depop\.com\/(?:[a-z]{2}\/)?products\/[a-z0-9_-]+\/?(?:\?[^\s"'<>)]*)?/gi)) add(match[0]);
+  for (const match of normalized.matchAll(/https?%3A%2F%2F(?:www\.)?depop\.com%2F(?:[a-z]{2}%2F)?products%2F[a-z0-9_-]+/gi)) add(match[0]);
+  for (const match of normalized.matchAll(/(?:href|url|uddg|target|q)=["']?([^"'&<>\s]+)/gi)) add(match[1]);
+
+  for (const match of normalized.matchAll(/[?&]u=([^&"'<>\s]+)/gi)) {
+    const target = decodeBingTarget(match[1]);
+    if (target) add(target);
+  }
+  for (const match of normalized.matchAll(/[?&](?:url|uddg|target)=([^&"'<>\s]+)/gi)) add(match[1]);
+  return [...values].slice(0, MAX_INDEXED_DEPOP_LINKS);
+}
+
+function titleFromDepopUrl(url: string) {
+  try {
+    const slug = new URL(url).pathname.match(/\/products\/([^/]+)/i)?.[1] || "Depop listing";
+    return slug.replace(/[-_]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase()).slice(0, 180);
+  } catch {
+    return "Depop listing";
+  }
+}
+
+function indexedDepopMarkdown(urls: string[], sourceLabel: string) {
+  return urls.map((url, index) =>
+    `${index + 1}. [${titleFromDepopUrl(url)}](${url})\nIndexed public Depop product link discovered through ${sourceLabel}.`,
+  ).join("\n\n");
+}
+
+async function fetchIndexBody(url: string, requestSignal: AbortSignal, accept: string) {
+  const response = await timedFetch(url, INDEX_TIMEOUT_MS, requestSignal, {
     method: "GET",
     redirect: "follow",
     cache: "no-store",
     headers: {
-      accept: "application/rss+xml,application/xml,text/xml;q=0.9,*/*;q=0.5",
+      accept,
       "accept-language": "en-US,en;q=0.9",
-      "user-agent": "Mozilla/5.0 (compatible; ResaleMasterLab/2.0; public listing index recovery)",
+      "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36",
     },
   });
-  if (!response.ok) return { body: "", count: 0 };
-  const { body: xml } = await readLimitedText(response);
-  const records: Array<{ title: string; url: string; description: string }> = [];
-  for (const item of xml.matchAll(/<item>([\s\S]*?)<\/item>/gi)) {
-    const chunk = item[1];
-    const url = canonicalDepopProduct(chunk.match(/<link>([\s\S]*?)<\/link>/i)?.[1] || "");
-    if (!url || records.some((record) => record.url === url)) continue;
-    const title = decodeXml(chunk.match(/<title>([\s\S]*?)<\/title>/i)?.[1] || "Depop listing")
-      .replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-    const description = decodeXml(chunk.match(/<description>([\s\S]*?)<\/description>/i)?.[1] || "")
-      .replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-    records.push({ title, url, description });
-    if (records.length >= MAX_INDEXED_DEPOP_LINKS) break;
+  if (!response.ok) throw new Error(`Index HTTP ${response.status}`);
+  return readLimitedText(response);
+}
+
+async function fetchIndexedDepopLinks(sourceUrl: URL, requestSignal: AbortSignal) {
+  const term = depopSearchTerm(sourceUrl);
+  if (!term) throw new Error("Depop index recovery requires a search term.");
+  const searchQuery = `site:depop.com/products/ ${term}`;
+  const sources = [
+    {
+      label: "Bing RSS",
+      url: `https://www.bing.com/search?format=rss&count=30&q=${encodeURIComponent(searchQuery)}`,
+      accept: "application/rss+xml,application/xml,text/xml;q=0.9,*/*;q=0.5",
+    },
+    {
+      label: "Bing web index",
+      url: `https://www.bing.com/search?count=30&setlang=en-US&q=${encodeURIComponent(searchQuery)}`,
+      accept: "text/html,application/xhtml+xml;q=0.9,*/*;q=0.5",
+    },
+    {
+      label: "DuckDuckGo web index",
+      url: `https://html.duckduckgo.com/html/?q=${encodeURIComponent(searchQuery)}`,
+      accept: "text/html,application/xhtml+xml;q=0.9,*/*;q=0.5",
+    },
+  ];
+
+  const found = new Set<string>();
+  const used: string[] = [];
+  for (const source of sources) {
+    try {
+      const { body } = await fetchIndexBody(source.url, requestSignal, source.accept);
+      const urls = candidateUrlsFromIndexBody(body);
+      if (urls.length) used.push(source.label);
+      for (const url of urls) found.add(url);
+      if (found.size >= MAX_INDEXED_DEPOP_LINKS) break;
+    } catch {
+      // Continue to the next bounded public index source.
+    }
   }
-  const markdown = records.map((record, index) =>
-    `${index + 1}. [${record.title || "Depop listing"}](${record.url})\n${record.description}`,
-  ).join("\n\n");
-  return { body: markdown, count: records.length };
+  const urls = [...found].slice(0, MAX_INDEXED_DEPOP_LINKS);
+  if (!urls.length) throw new Error("No indexed Depop product links were found.");
+  return {
+    body: indexedDepopMarkdown(urls, used.join(" + ") || "public search index"),
+    count: urls.length,
+  };
+}
+
+function depopSourceVariants(sourceUrl: URL) {
+  const values = new Map<string, URL>();
+  const add = (url: URL) => values.set(url.toString(), url);
+  add(sourceUrl);
+  if (!/^\/[a-z]{2}\//i.test(sourceUrl.pathname)) {
+    const us = new URL(sourceUrl);
+    us.pathname = `/us${sourceUrl.pathname.startsWith("/") ? sourceUrl.pathname : `/${sourceUrl.pathname}`}`;
+    add(us);
+  }
+  return [...values.values()];
 }
 
 function relayResponse(body: string, options: {
@@ -259,7 +475,7 @@ function relayResponse(body: string, options: {
   contentType: string;
   upstreamStatus: number;
   truncated?: boolean;
-  recovery: "official" | "depop-reader" | "depop-index" | "depop-empty";
+  recovery: RecoveryTransport;
   originalStatus?: number;
 }) {
   return new Response(body, {
@@ -269,7 +485,7 @@ function relayResponse(body: string, options: {
       "cache-control": "no-store, max-age=0",
       "cdn-cache-control": "no-store",
       "x-rml-worker-revision": WORKER_REVISION,
-      "x-rml-marketplace-mode": "frontend-api-page-source-recovery",
+      "x-rml-marketplace-mode": "frontend-api-depop-parallel-recovery",
       "x-rml-upstream-status": String(options.upstreamStatus),
       "x-rml-original-upstream-status": String(options.originalStatus ?? options.upstreamStatus),
       "x-rml-final-url": options.finalUrl.toString(),
@@ -280,11 +496,11 @@ function relayResponse(body: string, options: {
   });
 }
 
-async function relayDepop(sourceUrl: URL, request: Request) {
-  let officialStatus = 0;
-  try {
-    const { response, url } = await fetchMarketplacePage(sourceUrl, request.signal);
-    officialStatus = response.status;
+async function officialDepopResponse(sourceUrl: URL, requestSignal: AbortSignal) {
+  let lastStatus = 0;
+  for (const variant of depopSourceVariants(sourceUrl)) {
+    const { response, url } = await fetchMarketplacePage(variant, requestSignal, DEPOP_ORIGIN_TIMEOUT_MS);
+    lastStatus = response.status;
     const { body, truncated } = await readLimitedText(response);
     const cards = depopProductCount(body);
     const challenge = depopChallenge(response.status, body);
@@ -300,64 +516,107 @@ async function relayDepop(sourceUrl: URL, request: Request) {
         recovery: "official",
       });
     }
-  } catch {
-    // Continue to the readable page source. The frontend receives one bounded
-    // response instead of the raw origin exception or forbidden HTML.
   }
+  throw new Error(`Depop origin did not expose usable cards (${lastStatus || "network"}).`);
+}
 
-  try {
-    const reader = await fetchDepopReader(sourceUrl, request.signal);
+async function apiDepopResponse(sourceUrl: URL, requestSignal: AbortSignal) {
+  if (isDepopProductUrl(sourceUrl)) throw new Error("Search API is not used for product pages.");
+  const api = await fetchDepopApi(sourceUrl, requestSignal);
+  return relayResponse(api.body, {
+    finalUrl: sourceUrl,
+    contentType: api.response.headers.get("content-type") || "application/json; charset=utf-8",
+    upstreamStatus: 200,
+    originalStatus: api.response.status,
+    truncated: api.truncated,
+    recovery: "depop-api",
+  });
+}
+
+async function readerDepopResponse(sourceUrl: URL, requestSignal: AbortSignal) {
+  let lastStatus = 0;
+  for (const variant of depopSourceVariants(sourceUrl)) {
+    const reader = await fetchDepopReader(variant, requestSignal);
+    lastStatus = reader.response.status;
     const cards = depopProductCount(reader.body);
-    const usableProductPage = isDepopProductUrl(sourceUrl) && reader.response.ok
+    const usableProductPage = isDepopProductUrl(variant) && reader.response.ok
       && reader.body.trim().length > 200 && depopProductPageEvidence(reader.body);
     if ((cards > 0 || usableProductPage) && !depopChallenge(reader.response.status, reader.body)) {
       return relayResponse(reader.body, {
-        finalUrl: sourceUrl,
-        contentType: reader.response.headers.get("content-type") || "text/plain; charset=utf-8",
+        finalUrl: variant,
+        contentType: "text/markdown; charset=utf-8",
         upstreamStatus: 200,
-        originalStatus: officialStatus || reader.response.status,
+        originalStatus: lastStatus,
         truncated: reader.truncated,
         recovery: "depop-reader",
       });
     }
-  } catch {
-    // Search-result index recovery below is intentionally limited to Depop
-    // search/brand/theme pages; product pages simply return an empty recovery.
   }
+  throw new Error(`Depop readable source did not expose product links (${lastStatus || "network"}).`);
+}
 
-  if (!isDepopProductUrl(sourceUrl)) {
-    try {
-      const indexed = await fetchIndexedDepopLinks(sourceUrl, request.signal);
-      if (indexed.count > 0) {
-        return relayResponse(indexed.body, {
-          finalUrl: sourceUrl,
-          contentType: "text/markdown; charset=utf-8",
-          upstreamStatus: 200,
-          originalStatus: officialStatus || 403,
-          recovery: "depop-index",
-        });
-      }
-    } catch {
-      // Return a clean empty source below. Never expose the raw forbidden page.
-    }
-  }
-
-  return relayResponse("Depop public page source was unavailable for this request.", {
+async function indexDepopResponse(sourceUrl: URL, requestSignal: AbortSignal) {
+  if (isDepopProductUrl(sourceUrl)) throw new Error("Index recovery is not used for one product page.");
+  const indexed = await fetchIndexedDepopLinks(sourceUrl, requestSignal);
+  return relayResponse(indexed.body, {
     finalUrl: sourceUrl,
-    contentType: "text/plain; charset=utf-8",
+    contentType: "text/markdown; charset=utf-8",
     upstreamStatus: 200,
-    originalStatus: officialStatus || 403,
-    recovery: "depop-empty",
+    originalStatus: 403,
+    recovery: "depop-index",
   });
+}
+
+async function relayDepop(sourceUrl: URL, request: Request) {
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  if (request.signal.aborted) controller.abort();
+  else request.signal.addEventListener("abort", abort, { once: true });
+
+  try {
+    const tasks: Array<Promise<Response>> = [
+      officialDepopResponse(sourceUrl, controller.signal),
+      readerDepopResponse(sourceUrl, controller.signal),
+    ];
+    if (!isDepopProductUrl(sourceUrl)) {
+      tasks.push(apiDepopResponse(sourceUrl, controller.signal));
+      tasks.push(indexDepopResponse(sourceUrl, controller.signal));
+    }
+    try {
+      const result = await Promise.any(tasks);
+      controller.abort();
+      return result;
+    } catch {
+      const empty = JSON.stringify({
+        products: [],
+        meta: { hasMore: false, resultCount: 0 },
+        recovery: "depop-empty",
+      });
+      return relayResponse(empty, {
+        finalUrl: sourceUrl,
+        contentType: "application/json; charset=utf-8",
+        upstreamStatus: 200,
+        originalStatus: 403,
+        recovery: "depop-empty",
+      });
+    }
+  } finally {
+    request.signal.removeEventListener("abort", abort);
+  }
 }
 
 async function relay(request: Request) {
   const requestUrl = new URL(request.url);
-  let source = requestUrl.searchParams.get("source") || "";
+  let source = requestUrl.searchParams.get("source") || depopSourceFromRequest(requestUrl);
   if (request.method === "POST") {
     try {
-      const payload = await request.json() as { source?: unknown; url?: unknown };
-      source = typeof payload.source === "string" ? payload.source : typeof payload.url === "string" ? payload.url : "";
+      const payload = await request.json() as { source?: unknown; url?: unknown; marketplace?: unknown; query?: unknown; q?: unknown; page?: unknown };
+      source = typeof payload.source === "string" ? payload.source : typeof payload.url === "string" ? payload.url : source;
+      if (!source && String(payload.marketplace || "").toLowerCase() === "depop") {
+        const query = String(payload.query || payload.q || "").trim();
+        const page = Math.max(0, Number(payload.page) || 0) + 1;
+        if (query) source = `https://www.depop.com/us/search/?q=${encodeURIComponent(query)}&page=${page}`;
+      }
     } catch {
       return errorJson("The request body must be valid JSON.", 400);
     }
