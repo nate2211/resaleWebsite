@@ -36,7 +36,9 @@ test("Depop API recovery is bounded and discards challenge HTML", async () => {
   assert.match(route, /function depopChallenge/);
   assert.match(route, /fetchDepopReader/);
   assert.match(route, /fetchIndexedDepopLinks/);
-  assert.match(route, /Promise\.any\(tasks\)/);
+  assert.match(route, /const attempts: Array<\(\) => Promise<Response>>/);
+  assert.match(route, /officialDepopResponse[\s\S]{0,500}apiDepopResponse[\s\S]{0,500}readerDepopResponse[\s\S]{0,500}indexDepopResponse/);
+  assert.doesNotMatch(route, /Promise\.any\(tasks\)/);
   assert.match(route, /fetchDepopApi/);
   assert.match(route, /x-with-links-summary/);
   assert.match(route, /MAX_INDEXED_DEPOP_LINKS = 24/);
@@ -124,8 +126,8 @@ test("the Browser Bridge extension was removed", async () => {
 test("health and deployment identify frontend-API recovery", async () => {
   const health = await source("app/api/health/route.ts");
   const wrangler = await source("wrangler.jsonc");
-  assert.match(health, /market-search-bounded-pagination-v25/);
-  assert.match(health, /frontend-api-depop-parallel-recovery/);
-  assert.match(wrangler, /frontend-api-depop-parallel-recovery/);
+  assert.match(health, /live-source-ranking-v26/);
+  assert.match(health, /frontend-api-depop-live-page-priority/);
+  assert.match(wrangler, /frontend-api-depop-live-page-priority/);
   assert.doesNotMatch(wrangler, /"browser"\s*:/i);
 });

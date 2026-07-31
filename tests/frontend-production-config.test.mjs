@@ -9,15 +9,15 @@ test("targets the production custom domain while retaining workers.dev diagnosti
   const wrangler = JSON.parse(await source("wrangler.jsonc"));
   assert.equal(wrangler.name, "resalewebsite");
   assert.equal(wrangler.workers_dev, true);
-  assert.equal(wrangler.vars.RML_MARKETPLACE_TRANSPORT, "frontend-api-depop-parallel-recovery");
+  assert.equal(wrangler.vars.RML_MARKETPLACE_TRANSPORT, "frontend-api-depop-live-page-priority");
   assert.deepEqual(wrangler.routes, [{ pattern: "resalemasterlab.cloud-cord.com", custom_domain: true }]);
   assert.equal(wrangler.browser, undefined);
 });
 
 test("production checker verifies the bounded marketplace results API", async () => {
   const checker = await source("scripts/check-production.mjs");
-  assert.match(checker, /market-search-bounded-pagination-v25/);
-  assert.match(checker, /parallel-depop-ssr-api-reader-index-recovery/);
+  assert.match(checker, /live-source-ranking-v26/);
+  assert.match(checker, /ordered-depop-official-api-reader-index-recovery/);
   assert.match(checker, /x-rml-upstream-status/);
   assert.match(checker, /example\.com/);
   assert.doesNotMatch(checker, /media-photos\.depop/);

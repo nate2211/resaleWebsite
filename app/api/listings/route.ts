@@ -1,7 +1,7 @@
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
-const WORKER_REVISION = "market-search-bounded-pagination-v25";
+const WORKER_REVISION = "depop-live-page-priority-v26";
 const MAX_BODY_BYTES = 5_500_000;
 const UPSTREAM_TIMEOUT_MS = 15_000;
 const DEPOP_ORIGIN_TIMEOUT_MS = 9_000;
@@ -72,7 +72,7 @@ function depopSourceFromRequest(requestUrl: URL) {
   const query = (requestUrl.searchParams.get("q") || requestUrl.searchParams.get("query") || "").trim();
   if (!query) return "";
   const page = Math.max(0, Number.parseInt(requestUrl.searchParams.get("page") || "0", 10) || 0) + 1;
-  return `https://www.depop.com/us/search/?q=${encodeURIComponent(query)}&page=${page}`;
+  return `https://www.depop.com/search/?q=${encodeURIComponent(query)}&page=${page}`;
 }
 
 function errorJson(message: string, status: number) {
@@ -81,7 +81,7 @@ function errorJson(message: string, status: number) {
     headers: {
       "cache-control": "no-store, max-age=0",
       "x-rml-worker-revision": WORKER_REVISION,
-      "x-rml-marketplace-mode": "frontend-api-depop-parallel-recovery",
+      "x-rml-marketplace-mode": "frontend-api-depop-live-page-priority",
       "x-rml-relay-error": "1",
     },
   });
@@ -493,7 +493,7 @@ function relayResponse(body: string, options: {
       "cache-control": "no-store, max-age=0",
       "cdn-cache-control": "no-store",
       "x-rml-worker-revision": WORKER_REVISION,
-      "x-rml-marketplace-mode": "frontend-api-depop-parallel-recovery",
+      "x-rml-marketplace-mode": "frontend-api-depop-live-page-priority",
       "x-rml-upstream-status": String(options.upstreamStatus),
       "x-rml-original-upstream-status": String(options.originalStatus ?? options.upstreamStatus),
       "x-rml-final-url": options.finalUrl.toString(),
@@ -582,32 +582,37 @@ async function relayDepop(sourceUrl: URL, request: Request) {
   else request.signal.addEventListener("abort", abort, { once: true });
 
   try {
-    const tasks: Array<Promise<Response>> = [
-      officialDepopResponse(sourceUrl, controller.signal),
-      readerDepopResponse(sourceUrl, controller.signal),
+    // Prefer Depop's real search/product page. The former Promise.any race could
+    // let a fast web-index response win before the official page, returning stale
+    // links with no current price or product photo.
+    const attempts: Array<() => Promise<Response>> = [
+      () => officialDepopResponse(sourceUrl, controller.signal),
     ];
-    if (!isDepopProductUrl(sourceUrl)) {
-      tasks.push(apiDepopResponse(sourceUrl, controller.signal));
-      tasks.push(indexDepopResponse(sourceUrl, controller.signal));
+    if (!isDepopProductUrl(sourceUrl)) attempts.push(() => apiDepopResponse(sourceUrl, controller.signal));
+    attempts.push(() => readerDepopResponse(sourceUrl, controller.signal));
+    if (!isDepopProductUrl(sourceUrl)) attempts.push(() => indexDepopResponse(sourceUrl, controller.signal));
+
+    for (const attempt of attempts) {
+      if (controller.signal.aborted) break;
+      try {
+        return await attempt();
+      } catch {
+        // Continue through the bounded recovery order.
+      }
     }
-    try {
-      const result = await Promise.any(tasks);
-      controller.abort();
-      return result;
-    } catch {
-      const empty = JSON.stringify({
-        products: [],
-        meta: { hasMore: false, resultCount: 0 },
-        recovery: "depop-empty",
-      });
-      return relayResponse(empty, {
-        finalUrl: sourceUrl,
-        contentType: "application/json; charset=utf-8",
-        upstreamStatus: 200,
-        originalStatus: 403,
-        recovery: "depop-empty",
-      });
-    }
+
+    const empty = JSON.stringify({
+      products: [],
+      meta: { hasMore: false, resultCount: 0 },
+      recovery: "depop-empty",
+    });
+    return relayResponse(empty, {
+      finalUrl: sourceUrl,
+      contentType: "application/json; charset=utf-8",
+      upstreamStatus: 200,
+      originalStatus: 403,
+      recovery: "depop-empty",
+    });
   } finally {
     request.signal.removeEventListener("abort", abort);
   }
@@ -623,7 +628,7 @@ async function relay(request: Request) {
       if (!source && String(payload.marketplace || "").toLowerCase() === "depop") {
         const query = String(payload.query || payload.q || "").trim();
         const page = Math.max(0, Number(payload.page) || 0) + 1;
-        if (query) source = `https://www.depop.com/us/search/?q=${encodeURIComponent(query)}&page=${page}`;
+        if (query) source = `https://www.depop.com/search/?q=${encodeURIComponent(query)}&page=${page}`;
       }
     } catch {
       return errorJson("The request body must be valid JSON.", 400);

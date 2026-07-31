@@ -1,40 +1,42 @@
-# ResaleMasterLab bounded marketplace pagination v25
+# ResaleMasterLab live marketplace source ranking v26
 
-This build preserves the first-party Depop recovery and strict real-photo Grailed cards while fixing ZenMarket multi-store recovery and Grailed post counts. It does not require a browser extension.
+This build restores Depop from its normal search and product pages, ranks Grailed through the current listing-quality index, preserves bounded pagination, and keeps the ZenMarket multi-store recovery. It does not require a browser extension.
+
+## Depop request flow
+
+1. The frontend uses the normal search URL: `https://www.depop.com/search/?q=<query>&page=<page>`.
+2. `/api/listings` tries the official Depop page first. Public catalog data, readable-page recovery, and indexed links are fallback tiers rather than a race that can let stale indexed links win.
+3. The search-page parser reads complete server-rendered product cards: canonical `/products/<seller>-<item>-<id>/` URL, title, brand, size, current price, and first-party `media-photos.depop.com` P0 image.
+4. Discounted cards prefer the final displayed price instead of the struck-through original price.
+5. Product-page hydration remains available for incomplete candidates.
+6. Bare profile-shaped product paths, navigation artwork, Contentful tiles, placeholders, avatars, QR codes, and incomplete indexed links never become product cards.
+
+The supplied `raf simons` search source parses into 21 current products, including the `shelfaschive_` AW05 Peter De Potter listing with its real P0 image and discounted $160 price.
 
 ## Grailed request flow
 
-1. ResaleMasterLab reads Grailed's public page-source configuration for the current Algolia application ID, public search key, and active/sold indexes.
-2. `/api/grailed-search` tries the standard Algolia DNS names with both batch and single-index request formats.
-3. Each active or sold request asks for exactly 40 hits from one Algolia page; `nbHits` is retained only as the available-result count and is never used as a loop bound.
-4. `Load more` advances one page at a time and appends unique URLs, with a 20-page safety ceiling shared by every marketplace.
-5. Only canonical `/listings/<id>-...` URLs, positive prices, meaningful titles, and first-party `/prd/listing/<id>/...` or current `/prd/listing/temp/...` photos become cards.
-6. Valid index records missing card fields become bounded product-page hydration candidates.
-7. The marketplace selector shows `loaded / found`, so a broad query can display `40 loaded / 36,000 found` without requesting 36,000 records.
+1. ResaleMasterLab reads Grailed's public page-source configuration.
+2. Active searches use `Listing_by_listing_quality_production`, matching the ranking index exposed in current Grailed listing links. Sold comparisons continue to use `Listing_sold_production` and prefer `sold_price`.
+3. `/api/grailed-search` requests one page of 40 hits. It never loops over the broad Algolia `nbHits` value.
+4. Multiword queries use strict syntax, and returned hits must contain every meaningful query token in the title, designer, brand, description, or category evidence.
+5. Sold, removed, deleted, archived, inactive, or very old unmodified active-index rows are rejected.
+6. Results are ranked by exact query relevance and recent listing activity.
+7. The raw broad index total is retained as `rawNbHits` for diagnostics only. The UI reports the validated current rows loaded, so a historical `93,000` count is not presented as current inventory.
+8. `Load more` advances one bounded page at a time, appends unique listing URLs, and stops after 20 pages.
+9. Only canonical `/listings/<id>-...` URLs, positive prices, meaningful titles, and first-party `/prd/listing/<id>/...` or `/prd/listing/temp/...` photos become cards.
 
-Measurement guides, `/prd/measurement-type/`, `/prd/misc/`, logos, avatars, badges, placeholders, and generic site artwork are rejected. Active searches use `Listing_production`; sold evidence uses `Listing_sold_production` and prefers `sold_price`.
+Measurement guides, `/prd/measurement-type/`, `/prd/misc/`, logos, avatars, badges, placeholders, and generic configuration images remain rejected.
 
 ## ZenMarket request flow
 
-The following established ZenMarket search routes are retained:
+The established store routes remain:
 
 - Mercari Japan: `stores=27`
 - JDirectItems Auction: `stores=28`
 - Rakuten: `stores=0`
 - Rakuten Rakuma: `stores=25`
 
-For each store, `/api/zenmarket-search`:
-
-1. Tries bounded ZenMarket catalog requests.
-2. Accepts a response only when it contains complete product records; an HTTP 200 error envelope is not treated as success.
-3. Rejects Cloudflare `Just a moment...` challenge HTML and ASP.NET error objects.
-4. Tries the exact ZenMarket search page and dedicated store page.
-5. Recovers products from the corresponding official source marketplace when ZenMarket is challenged.
-6. Rebuilds each recovered result as the proper ZenMarket product URL (`mercariproduct.aspx`, `auction.aspx`, `rakutenproduct.aspx`, or `rakumaproduct.aspx`).
-
-## Depop request flow
-
-`/api/listings` preserves the bounded public recovery chain and suppresses raw 401, 403, 429, Cloudflare challenge, and “Sorry, not authorized” pages. Bare profile-shaped paths such as `/products/zostasho24/` are rejected. A Depop card must have a normal listing slug, a positive price, and a first-party `media-photos.depop.com` product image; the UI no longer substitutes the generic placeholder for incomplete Depop candidates.
+The relay rejects Cloudflare challenge pages and HTTP 200 error envelopes, accepts only complete products, tries exact ZenMarket and dedicated store pages, recovers from official source marketplaces, and rebuilds normal ZenMarket product links.
 
 ## Run
 

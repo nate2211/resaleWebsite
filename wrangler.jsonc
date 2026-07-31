@@ -17,10 +17,10 @@
     "enabled": true
   },
   "vars": {
-    "RML_MARKETPLACE_TRANSPORT": "frontend-api-depop-parallel-recovery",
+    "RML_MARKETPLACE_TRANSPORT": "frontend-api-depop-live-page-priority",
     "RML_GRAILED_SEARCH": "public-index",
     "NEXT_PUBLIC_SITE_URL": "https://resalemasterlab.cloud-cord.com",
-    "RML_FEATURES": "thrift-check,listing-template,parallel-depop-recovery"
+    "RML_FEATURES": "thrift-check,listing-template,depop-live-page-priority,grailed-quality-ranking"
   },
   "routes": [
     {

@@ -79,7 +79,7 @@ test("ZenMarket rejects Cloudflare/error envelopes and rebuilds normal product l
   }
 });
 
-test("Grailed uses standard Algolia hosts, returns strict cards, and preserves the post count", async (t) => {
+test("Grailed uses the quality index, returns strict current cards, and keeps the broad count diagnostic-only", async (t) => {
   const found = await compiler(t); if (!found) return;
   const outDir = await mkdtemp(join(tmpdir(), "rml-grailed-v25-"));
   const originalFetch = globalThis.fetch;
@@ -135,8 +135,10 @@ test("Grailed uses standard Algolia hosts, returns strict cards, and preserves t
       }),
     }));
     const payload = await response.json();
-    assert.equal(payload.nbHits, 128);
+    assert.equal(payload.nbHits, 1);
+    assert.equal(payload.rawNbHits, 128);
     assert.equal(payload.hits.length, 1);
+    assert.equal(payload.index, "Listing_by_listing_quality_production");
     assert.match(payload.hits[0].url, /grailed\.com\/listings\/94344907/);
     assert.match(payload.hits[0].image, /\/prd\/listing\/94344907\//);
     assert.doesNotMatch(JSON.stringify(payload.hits), /measurement-type/);

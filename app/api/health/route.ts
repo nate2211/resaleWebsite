@@ -3,13 +3,13 @@ export const runtime = "edge";
 export async function GET() {
   return Response.json({
     ok: true,
-    revision: "market-search-bounded-pagination-v25",
-    marketplaceRequests: "frontend-api-depop-parallel-recovery",
-    grailedSearch: "strict-public-index-and-product-page-parser",
+    revision: "live-source-ranking-v26",
+    marketplaceRequests: "frontend-api-depop-live-page-priority",
+    grailedSearch: "quality-ranked-current-index-and-product-page-parser",
     grailedCardValidation: "canonical-url-positive-price-real-listing-photo",
     grailedImagePolicy: "prd-listing-only-no-measurement-misc-placeholder",
     browserBindingAvailable: false,
-    cloudflareMarketplaceFetches: "parallel-depop-ssr-api-reader-index-recovery",
+    cloudflareMarketplaceFetches: "ordered-depop-official-api-reader-index-recovery",
     grailedPublicIndexFetches: "one-40-hit-json-page-per-active-or-sold-search",
     marketplacePagination: "append-unique-pages-up-to-20",
     depopCardValidation: "listing-slug-positive-price-media-photos-only",
@@ -17,7 +17,7 @@ export async function GET() {
     navigation: "complete-sticky-responsive-menu",
     marketplaceBatchSize: { standard: 3, allMarkets: 2 },
     marketplaceRelayConcurrency: 3,
-    depopDiscovery: "parallel-ssr-public-catalog-reader-index-and-product-page-sources",
+    depopDiscovery: "official-search-html-first-then-api-reader-index",
     mercariJapanDiscovery: "zenmarket-mercari-store-27-catalog-and-page-sources",
     zenMarketDiscovery: {
       mercariJapan: "store-27-catalog-plus-mercari-and-cross-site-pages",

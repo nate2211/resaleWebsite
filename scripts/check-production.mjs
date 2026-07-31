@@ -47,11 +47,11 @@ for (const route of ["/thrift-check", "/listing-template", "/manifest.webmanifes
 const healthResult = await read("/api/health");
 if (!healthResult.response.ok) throw new Error(`/api/health returned HTTP ${healthResult.response.status}.`);
 const health = JSON.parse(healthResult.text);
-if (health.revision !== "market-search-bounded-pagination-v25") {
+if (health.revision !== "live-source-ranking-v26") {
   throw new Error(`The domain is serving an older revision: ${health.revision || "unknown"}.`);
 }
-if (health.marketplaceRequests !== "frontend-api-depop-parallel-recovery"
-  || health.cloudflareMarketplaceFetches !== "parallel-depop-ssr-api-reader-index-recovery") {
+if (health.marketplaceRequests !== "frontend-api-depop-live-page-priority"
+  || health.cloudflareMarketplaceFetches !== "ordered-depop-official-api-reader-index-recovery") {
   throw new Error("The deployed version is not using the frontend marketplace API recovery flow.");
 }
 
@@ -69,8 +69,8 @@ if (!upstreamStatus || !/depop\.com/i.test(finalUrl) || relayResult.text.length 
 if (/sorry,? not authorized|403 forbidden/i.test(relayResult.text)) {
   throw new Error("The marketplace API exposed raw Depop forbidden HTML instead of applying recovery.");
 }
-if (!/frontend-api-depop-parallel-recovery/i.test(relayResult.response.headers.get("x-rml-marketplace-mode") || "")) {
-  throw new Error("The marketplace endpoint is not serving the v22 marketplace recovery transport.");
+if (!/frontend-api-depop-live-page-priority/i.test(relayResult.response.headers.get("x-rml-marketplace-mode") || "")) {
+  throw new Error("The marketplace endpoint is not serving the v26 live-page-priority transport.");
 }
 if (!/^(official|depop-api|depop-reader|depop-index|depop-empty)$/.test(recoveryTransport)) {
   throw new Error(`Unexpected Depop recovery transport: ${recoveryTransport || "missing"}.`);
@@ -80,7 +80,7 @@ const grailedResult = await post("/api/grailed-search", {
   query: "supreme",
   page: 0,
   mode: "active",
-  index: "Listing_production",
+  index: "Listing_by_listing_quality_production",
   appId: "MNRWEFSS2Q",
   apiKey: "c89dbaddf15fe70e1941a109bf7c2a3d",
 });

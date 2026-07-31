@@ -20,6 +20,7 @@ import {
   isGrailedListingRecord,
   parseDepopProductPageSource,
   parseDepopReaderMarkdown,
+  parseDepopSearchPageSource,
   parseGrailedProductPageSource,
   parseGrailedPublicConfig,
   type GrailedPublicConfig,
@@ -338,11 +339,16 @@ function grailedSearchMeta(text: string) {
     const payload = grailedSearchPayload(JSON.parse(text));
     const hits = Array.isArray(payload.hits) ? payload.hits.length : 0;
     const candidates = Array.isArray(payload.candidates) ? payload.candidates.length : 0;
-    const total = Math.max(0, Number(payload.nbHits) || 0);
     const page = Math.max(0, Number(payload.page) || 0);
     const nbPages = Math.max(0, Number(payload.nbPages) || 0);
     const pageSize = Math.max(1, Number(payload.pageSize) || MARKETPLACE_PAGE_SIZE);
-    const hasMore = typeof payload.hasMore === "boolean" ? payload.hasMore : page + 1 < nbPages;
+    // Raw Algolia nbHits can represent a broad historical corpus. Only show the
+    // validated floor returned by our API, or the rows actually present in a
+    // direct browser fallback.
+    const total = payload.totalIsValidatedFloor === true
+      ? Math.max(0, Number(payload.nbHits) || 0)
+      : page * pageSize + hits;
+    const hasMore = typeof payload.hasMore === "boolean" ? payload.hasMore : hits > 0 && page + 1 < nbPages;
     return { total, hits, candidates, page, nbPages, pageSize, hasMore, partial: payload.partial === true };
   } catch {
     return { total: 0, hits: 0, candidates: 0, page: 0, nbPages: 0, pageSize: MARKETPLACE_PAGE_SIZE, hasMore: false, partial: true };
@@ -350,11 +356,16 @@ function grailedSearchMeta(text: string) {
 }
 
 function grailedAlgoliaParams(query: string, page: number) {
+  const cleaned = query.replace(/["\\]/g, " ").replace(/\s+/g, " ").trim();
+  const exactQuery = cleaned.includes(" ") ? `"${cleaned}"` : cleaned;
   return new URLSearchParams({
-    query,
+    query: exactQuery,
     page: String(page),
     hitsPerPage: String(MARKETPLACE_PAGE_SIZE),
-    typoTolerance: "true",
+    typoTolerance: "min",
+    advancedSyntax: "true",
+    removeWordsIfNoResults: "none",
+    queryType: "prefixLast",
     distinct: "true",
     getRankingInfo: "true",
     attributesToRetrieve: "*",
@@ -949,10 +960,27 @@ function textFromSelector(root: Element, selectors: string) {
   return (root.querySelector(selectors)?.textContent || "").replace(/\s+/g, " ").trim();
 }
 
+function listingContainerForAnchor(anchor: HTMLAnchorElement, marketplace: Marketplace) {
+  if (marketplace === "Depop") {
+    // Depop nests the link inside a productImageContainer. Selecting the nearest
+    // generic [class*=product] ancestor stops before the sibling price/brand
+    // fields. The card/list item contains all required product evidence.
+    return anchor.closest("li,[class*='productCardRoot'],[data-testid*='product-card'],article") || anchor;
+  }
+  return anchor.closest("article,li,[data-testid],[data-item-id],[data-product-id],[class*='card'],[class*='item'],[class*='product']") || anchor;
+}
+
+function lastUsdPrice(value: string) {
+  const matches = [...value.matchAll(/(?:USD|US\$|\$)\s*([\d,.]+)/gi)]
+    .map((match) => Number.parseFloat(match[1].replaceAll(",", "")))
+    .filter((amount) => Number.isFinite(amount) && amount > 0);
+  return matches.at(-1) || 0;
+}
+
 function listingFromAnchor(anchor: HTMLAnchorElement, marketplace: Marketplace, base: string) {
   const url = canonicalListingUrl(anchor.getAttribute("href") || "", marketplace, base);
   if (!url || !marketplaceHrefPattern(marketplace).test(url)) return null;
-  const container = anchor.closest("article,li,[data-testid],[data-item-id],[data-product-id],[class*='card'],[class*='item'],[class*='product']") || anchor;
+  const container = listingContainerForAnchor(anchor, marketplace);
   const visibleText = (container.textContent || anchor.textContent || "").replace(/\s+/g, " ").trim();
   const title = (
     anchor.getAttribute("aria-label") || anchor.getAttribute("title") ||
@@ -963,11 +991,14 @@ function listingFromAnchor(anchor: HTMLAnchorElement, marketplace: Marketplace, 
   const publicPrice = priceFromPublicText(visibleText);
   const defaultCurrency = ["Rakuten", "Rakuten Rakuma", "JDirectItems Auction", "Mercari Japan"].includes(marketplace)
     ? "JPY" : marketplace === "Bunjang" ? "KRW" : "USD";
-  const price = toUsd(publicPrice.amount, publicPrice.currency || defaultCurrency);
+  const price = marketplace === "Depop"
+    ? lastUsdPrice(visibleText) || toUsd(publicPrice.amount, publicPrice.currency || defaultCurrency)
+    : toUsd(publicPrice.amount, publicPrice.currency || defaultCurrency);
   const image = bestImageFromElement(container, marketplace, base);
   const brand = textFromSelector(container, "[class*='brand'],[data-testid*='brand']") || "Unspecified";
   const size = textFromSelector(container, "[class*='size'],[data-testid*='size']") || "Unknown";
   const conditionText = textFromSelector(container, "[class*='condition'],[data-testid*='condition']");
+  if (marketplace === "Depop" && (!image || price <= 0 || /^(?:depop|depop listing|listing)$/i.test(title))) return null;
   if (marketplace === "Grailed" && (!image || price <= 0 || /^(?:grailed|listing)$/i.test(title))) return null;
   return {
     id: `${marketplace}-${url}`,
@@ -1027,6 +1058,7 @@ function parseEmbeddedSourceLinks(source: string, marketplace: Marketplace, base
       || context.match(/<img\b[^>]*(?:src|data-src|data-original)\s*=\s*"([^"]+)"/i)?.[1]
       || "";
     const image = marketplaceImage(imageRaw, marketplace, base);
+    if (marketplace === "Depop" && (!image || !priceInfo.amount || /^(?:depop|depop listing|listing)$/i.test(title))) continue;
     if (marketplace === "Grailed" && (!image || !priceInfo.amount || /^(?:grailed|grailed listing|listing)$/i.test(title))) continue;
     output.push({
       id: `${marketplace}-${url}`,
@@ -1202,6 +1234,9 @@ function parseResponse(response: TextResponse, marketplace: Marketplace) {
     .replaceAll("\/", "/").replaceAll("&amp;", "&");
   const output: Partial<Listing>[] = [];
   if (marketplace === "Depop") {
+    output.push(...parseDepopSearchPageSource(source, response.url)
+      .map((record) => partialFromRecord(record as unknown as Record<string, unknown>, "Depop", response.url))
+      .filter(Boolean) as Partial<Listing>[]);
     output.push(...depopMarkdownListings(source, response.url));
     const product = parseDepopProductPageSource(source, response.url);
     if (product) {
@@ -1496,7 +1531,7 @@ export async function searchMarketplaceFrontend(input: {
       marketplace,
       status: "live",
       message: marketplace === "Grailed"
-        ? `Loaded ${listings.length} of ${reported} matching Grailed post${reported === 1 ? "" : "s"} on page ${page + 1}${hydrated.hydrated ? ` · ${hydrated.hydrated} product page${hydrated.hydrated === 1 ? "" : "s"} hydrated` : ""}.`
+        ? `Loaded ${listings.length} current, query-relevant Grailed post${listings.length === 1 ? "" : "s"} on page ${page + 1}${grailedHasMore ? " · more current pages available" : ""}${hydrated.hydrated ? ` · ${hydrated.hydrated} product page${hydrated.hydrated === 1 ? "" : "s"} hydrated` : ""}.`
         : `Loaded ${listings.length} real listing${listings.length === 1 ? "" : "s"} through the frontend marketplace API and official public page sources${readerFallbackUsed ? " with readable-page recovery" : ""}${hydrated.hydrated ? `; enriched ${hydrated.hydrated} product page${hydrated.hydrated === 1 ? "" : "s"}` : ""}.`,
       sourceUrl,
       listings,

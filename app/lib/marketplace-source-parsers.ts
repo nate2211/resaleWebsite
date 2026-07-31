@@ -102,7 +102,7 @@ export type GrailedPublicConfig = {
 export const GRAILED_PUBLIC_CONFIG_FALLBACK: GrailedPublicConfig = {
   appId: "MNRWEFSS2Q",
   apiKey: "c89dbaddf15fe70e1941a109bf7c2a3d",
-  activeIndex: "Listing_production",
+  activeIndex: "Listing_by_listing_quality_production",
   soldIndex: "Listing_sold_production",
 };
 
@@ -185,6 +185,55 @@ function nextItemMarker(source: string, afterIndex: number) {
 function depopSize(lines: string[]) {
   const sizePattern = /^(?:XXXS|XXS|XS|S|M|L|XL|XXL|XXXL|ONE SIZE|OS|O\/S|\d{1,3}(?:\.5)?(?:\s*(?:US|UK|EU))?)$/i;
   return lines.find((line) => sizePattern.test(line)) || "Unknown";
+}
+
+/** Parse the server-rendered cards on a normal Depop /search/ page. */
+export function parseDepopSearchPageSource(source: string, pageUrl = "https://www.depop.com/search/"): DepopReaderRecord[] {
+  const text = source.replace(/\r\n?/g, "\n")
+    .replaceAll("\u002F", "/")
+    .replaceAll("\u0026", "&")
+    .replaceAll("\/", "/")
+    .replaceAll("&amp;", "&");
+  const output = new Map<string, DepopReaderRecord>();
+  const linkPattern = /<a\b[^>]*href=["']([^"']*\/products\/[a-z0-9_-]+\/?(?:\?[^"']*)?)["'][^>]*>/gi;
+  for (const match of text.matchAll(linkPattern)) {
+    const url = canonicalDepopUrl(new URL(match[1], pageUrl).toString());
+    if (!url || output.has(url)) continue;
+    const index = match.index || 0;
+    const liStart = text.lastIndexOf("<li", index);
+    const cardStart = liStart >= 0 && index - liStart < 12_000 ? liStart : Math.max(0, index - 2_000);
+    const liEnd = text.indexOf("</li>", index);
+    const cardEnd = liEnd >= 0 && liEnd - index < 30_000 ? liEnd + 5 : Math.min(text.length, index + 12_000);
+    const block = text.slice(cardStart, cardEnd);
+    const anchorTag = match[0];
+    const title = cleanText(
+      anchorTag.match(/aria-label=["']([^"']{3,320})["']/i)?.[1]
+      || anchorTag.match(/title=["']([^"']{3,320})["']/i)?.[1]
+      || block.match(/<img\b[^>]*alt=["']([^"']{3,320})["']/i)?.[1]
+      || "Depop listing",
+    );
+    const image = bestDepopImage(block);
+    const prices = [...block.matchAll(/(?:USD|US\$|\$)\s*([\d,.]+)/gi)]
+      .map((priceMatch) => Number.parseFloat(priceMatch[1].replaceAll(",", "")))
+      .filter((value) => Number.isFinite(value) && value > 0);
+    const price = prices.at(-1) || 0;
+    const brand = cleanText(block.match(/class=["'][^"']*brandName[^"']*["'][^>]*>([^<]{1,120})</i)?.[1] || "Unspecified");
+    const size = cleanText(block.match(/class=["'][^"']*sizeAttributeText[^"']*["'][^>]*>([^<]{1,80})</i)?.[1] || "Unknown");
+    if (!isDepopListingImageUrl(image) || price <= 0
+      || !title || /^(?:depop|depop listing|marketplace listing|untitled listing)$/i.test(title)) continue;
+    output.set(url, {
+      url,
+      title,
+      brand: brand || "Unspecified",
+      size: size || "Unknown",
+      price,
+      currency: "USD",
+      image,
+      description: cleanText(block).slice(0, 900),
+    });
+    if (output.size >= 40) break;
+  }
+  return [...output.values()];
 }
 
 /** Parse Depop cards from readable Markdown, serialized React text, or plain page-source links. */
@@ -271,9 +320,14 @@ export function parseGrailedPublicConfig(source: string): GrailedPublicConfig | 
     /"publicQueryKey"\s*:\s*"([a-z0-9]+)"/i,
   ]);
   if (!appId || !apiKey) return null;
-  const activeIndex = /"value"\s*:\s*"(Listing_production)"/i.test(source)
-    ? "Listing_production" : GRAILED_PUBLIC_CONFIG_FALLBACK.activeIndex;
-  const soldIndex = /"value"\s*:\s*"(Listing_sold_production)"/i.test(source)
+  const activeIndex = /"value"\s*:\s*"Listing_by_listing_quality_production"/i.test(source)
+    ? "Listing_by_listing_quality_production"
+    : /"value"\s*:\s*"Listing_by_heat_recency_production"/i.test(source)
+      ? "Listing_by_heat_recency_production"
+      : /"value"\s*:\s*"Listing_production"/i.test(source)
+        ? "Listing_production"
+        : GRAILED_PUBLIC_CONFIG_FALLBACK.activeIndex;
+  const soldIndex = /"value"\s*:\s*"Listing_sold_production"/i.test(source)
     ? "Listing_sold_production" : GRAILED_PUBLIC_CONFIG_FALLBACK.soldIndex;
   return { appId, apiKey, activeIndex, soldIndex };
 }

@@ -7,7 +7,7 @@ export async function POST() {
     listings: [],
     searches: [],
     frontendOnly: true,
-    workerRevision: "market-search-bounded-pagination-v25",
+    workerRevision: "live-source-ranking-v26",
   }, {
     status: 410,
     headers: { "cache-control": "no-store" },
