@@ -1,7 +1,7 @@
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
-const WORKER_REVISION = "market-search-depop-parallel-recovery-v21";
+const WORKER_REVISION = "market-search-grailed-real-listings-v22";
 const TOTAL_TIMEOUT_MS = 11_000;
 const PER_HOST_TIMEOUT_MS = 3_500;
 const MAX_RESPONSE_BYTES = 2_000_000;
@@ -68,6 +68,75 @@ function candidateHosts(appId: string) {
     `2-${normalized}-dsn.algolianet.com`,
     `3-${normalized}-dsn.algolianet.com`,
   ];
+}
+
+
+function grailedText(value: unknown) {
+  return typeof value === "string" ? value.trim()
+    : typeof value === "number" && Number.isFinite(value) ? String(value) : "";
+}
+
+function grailedNumber(value: unknown) {
+  const parsed = Number.parseFloat(String(value ?? "").replace(/[^\d.]/g, ""));
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
+function grailedListingImage(value: unknown, depth = 0): string {
+  if (depth > 6 || value === null || value === undefined) return "";
+  if (typeof value === "string") {
+    try {
+      const parsed = new URL(value.replaceAll("&amp;", "&"));
+      const host = parsed.hostname.toLowerCase();
+      const path = parsed.pathname.toLowerCase();
+      if (parsed.protocol !== "https:" || host !== "media-assets.grailed.com") return "";
+      if (/(?:measurement(?:-type)?|size[-_ ]?chart|placeholder|default|misc|logo|avatar|badge)/i.test(path)) return "";
+      return /\/prd\/listing\/\d+\/[a-z0-9_-]+/i.test(path) ? parsed.toString() : "";
+    } catch { return ""; }
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = grailedListingImage(item, depth + 1);
+      if (found) return found;
+    }
+    return "";
+  }
+  if (typeof value !== "object") return "";
+  const record = value as Record<string, unknown>;
+  for (const key of ["original_url", "originalUrl", "large_url", "largeUrl", "url", "src", "image_url", "imageUrl"]) {
+    const found = grailedListingImage(record[key], depth + 1);
+    if (found) return found;
+  }
+  for (const [key, item] of Object.entries(record)) {
+    if (!/(?:photo|image|cover|thumbnail)/i.test(key)) continue;
+    const found = grailedListingImage(item, depth + 1);
+    if (found) return found;
+  }
+  return "";
+}
+
+function validGrailedHit(value: unknown, mode: "active" | "sold") {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const hit = value as Record<string, unknown>;
+  const id = grailedText(hit.id) || grailedText(hit.objectID);
+  const title = grailedText(hit.title) || grailedText(hit.display_title) || grailedText(hit.name);
+  const image = grailedListingImage(hit.image_url) || grailedListingImage(hit.image)
+    || grailedListingImage(hit.cover_photo) || grailedListingImage(hit.coverPhoto)
+    || grailedListingImage(hit.photos) || grailedListingImage(hit.images);
+  const price = mode === "sold"
+    ? grailedNumber(hit.sold_price) || grailedNumber(hit.soldPrice) || grailedNumber(hit.price)
+    : grailedNumber(hit.price) || grailedNumber(hit.current_price) || grailedNumber(hit.listing_price);
+  return /^\d+$/.test(id) && title.length >= 3 && Boolean(image) && price > 0;
+}
+
+function sanitizeGrailedPayload(text: string, mode: "active" | "sold") {
+  const payload = JSON.parse(text) as Record<string, unknown>;
+  const rawHits = Array.isArray(payload.hits) ? payload.hits : [];
+  const hits = rawHits.filter((value) => validGrailedHit(value, mode));
+  return JSON.stringify({
+    ...payload,
+    hits,
+    filteredInvalidHits: Math.max(0, rawHits.length - hits.length),
+  });
 }
 
 async function requestHost(input: {
@@ -146,10 +215,16 @@ export async function POST(request: Request) {
           failures.push(`${host}: HTTP ${upstream.status}`);
           continue;
         }
-        return new Response(text, {
+        let sanitized = "";
+        try { sanitized = sanitizeGrailedPayload(text, mode); }
+        catch {
+          failures.push(`${host}: invalid JSON payload`);
+          continue;
+        }
+        return new Response(sanitized, {
           status: 200,
           headers: {
-            "content-type": upstream.headers.get("content-type") || "application/json; charset=utf-8",
+            "content-type": "application/json; charset=utf-8",
             "cache-control": "no-store, max-age=0",
             "x-rml-worker-revision": WORKER_REVISION,
             "x-rml-upstream-status": String(upstream.status),
@@ -171,10 +246,9 @@ export async function POST(request: Request) {
       page,
       nbPages: 0,
       partial: true,
+      recovery: "grailed-empty",
       marketplace: "Grailed",
       mode,
-      message: "Grailed's public listing index was temporarily unavailable; official page-source fallbacks remain active.",
-      failures: failures.slice(0, 5),
     }, {
       "x-rml-upstream-status": "0",
       "x-rml-partial-result": "1",

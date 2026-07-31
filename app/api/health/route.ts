@@ -3,9 +3,11 @@ export const runtime = "edge";
 export async function GET() {
   return Response.json({
     ok: true,
-    revision: "market-search-depop-parallel-recovery-v21",
+    revision: "market-search-grailed-real-listings-v22",
     marketplaceRequests: "frontend-api-depop-parallel-recovery",
-    grailedSearch: "public-index-relay",
+    grailedSearch: "strict-public-index-and-product-page-parser",
+    grailedCardValidation: "canonical-url-positive-price-real-listing-photo",
+    grailedImagePolicy: "prd-listing-only-no-measurement-misc-placeholder",
     browserBindingAvailable: false,
     cloudflareMarketplaceFetches: "parallel-depop-ssr-api-reader-index-recovery",
     grailedPublicIndexFetches: "one-bounded-json-request-per-search",

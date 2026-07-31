@@ -39,7 +39,7 @@ test("parses structured page state and hydrates only missing listing fields", as
 
 test("relay returns official or recovered page source with upstream metadata", async () => {
   const route = await source("app/api/listings/route.ts");
-  assert.match(route, /market-search-depop-parallel-recovery-v21/);
+  assert.match(route, /market-search-grailed-real-listings-v22/);
   assert.match(route, /x-rml-upstream-status/);
   assert.match(route, /x-rml-final-url/);
   assert.match(route, /x-rml-upstream-content-type/);

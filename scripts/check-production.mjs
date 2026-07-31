@@ -47,7 +47,7 @@ for (const route of ["/thrift-check", "/listing-template", "/manifest.webmanifes
 const healthResult = await read("/api/health");
 if (!healthResult.response.ok) throw new Error(`/api/health returned HTTP ${healthResult.response.status}.`);
 const health = JSON.parse(healthResult.text);
-if (health.revision !== "market-search-depop-parallel-recovery-v21") {
+if (health.revision !== "market-search-grailed-real-listings-v22") {
   throw new Error(`The domain is serving an older revision: ${health.revision || "unknown"}.`);
 }
 if (health.marketplaceRequests !== "frontend-api-depop-parallel-recovery"
@@ -70,7 +70,7 @@ if (/sorry,? not authorized|403 forbidden/i.test(relayResult.text)) {
   throw new Error("The marketplace API exposed raw Depop forbidden HTML instead of applying recovery.");
 }
 if (!/frontend-api-depop-parallel-recovery/i.test(relayResult.response.headers.get("x-rml-marketplace-mode") || "")) {
-  throw new Error("The marketplace endpoint is not serving the v21 parallel Depop recovery transport.");
+  throw new Error("The marketplace endpoint is not serving the v22 marketplace recovery transport.");
 }
 if (!/^(official|depop-api|depop-reader|depop-index|depop-empty)$/.test(recoveryTransport)) {
   throw new Error(`Unexpected Depop recovery transport: ${recoveryTransport || "missing"}.`);
@@ -92,8 +92,16 @@ let grailedHits = 0;
 let grailedPartial = false;
 try {
   const payload = JSON.parse(grailedResult.text);
-  grailedHits = Array.isArray(payload.hits) ? payload.hits.length : 0;
+  const hits = Array.isArray(payload.hits) ? payload.hits : [];
+  grailedHits = hits.length;
   grailedPartial = payload.partial === true;
+  for (const hit of hits) {
+    const serialized = JSON.stringify(hit);
+    if (!/\/prd\/listing\/\d+\//i.test(serialized)
+        || /measurement(?:-type)?|\/prd\/misc\/|placeholder|favicon|logo/i.test(serialized)) {
+      throw new Error("Grailed returned a non-listing, measurement, or placeholder image record.");
+    }
+  }
 } catch {
   throw new Error("The Grailed public-index relay did not return JSON.");
 }

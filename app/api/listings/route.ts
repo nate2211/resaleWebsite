@@ -1,7 +1,7 @@
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
-const WORKER_REVISION = "market-search-depop-parallel-recovery-v21";
+const WORKER_REVISION = "market-search-grailed-real-listings-v22";
 const MAX_BODY_BYTES = 5_500_000;
 const UPSTREAM_TIMEOUT_MS = 15_000;
 const DEPOP_ORIGIN_TIMEOUT_MS = 9_000;

@@ -62,21 +62,27 @@ $85.00
     const grailed = parser.grailedHitToRecord({
       objectID: "12345", title: "Supreme Box Logo Hoodie", price: 275,
       slug: "supreme-box-logo-hoodie", designers: [{ name: "Supreme" }],
-      cover_photo: { original_url: "https://media-assets.grailed.com/hoodie.jpg" }, display_size: "M",
+      cover_photo: { original_url: "https://media-assets.grailed.com/prd/listing/12345/hoodie-photo" }, display_size: "M",
     }, "active");
     assert.equal(grailed.price, 275);
     assert.equal(grailed.brand, "Supreme");
-    assert.match(grailed.url, /^\/listings\/12345-/);
+    assert.match(grailed.url, /^https:\/\/www\.grailed\.com\/listings\/12345-/);
     assert.match(grailed.image, /media-assets\.grailed\.com/);
   } finally { await rm(outDir, { recursive: true, force: true }); }
 });
 
 test("frontend uses Grailed public-index relay and parse-aware Depop reader fallback", async () => {
   const client = await readFile(new URL("../app/lib/frontend-marketplaces.ts", import.meta.url), "utf8");
+  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
   const route = await readFile(new URL("../app/api/grailed-search/route.ts", import.meta.url), "utf8");
   assert.match(client, /\/api\/grailed-search/);
   assert.match(client, /parseGrailedPublicConfig/);
   assert.match(client, /grailedHitToRecord/);
+  assert.match(client, /isCompleteGrailedListing/);
+  assert.match(client, /isGrailedListingImageUrl/);
+  assert.match(route, /sanitizeGrailedPayload/);
+  assert.match(page, /isRealGrailedCardData/);
+  assert.match(page, /\.filter\(isRealGrailedCardData\)/);
   assert.match(client, /parseDepopReaderMarkdown/);
   assert.match(client, /marketplace === "Depop" && !listings\.length/);
   assert.match(route, /algolia\.net|algolianet\.com/);
@@ -84,4 +90,70 @@ test("frontend uses Grailed public-index relay and parse-aware Depop reader fall
   assert.match(route, /Listing_sold_production/);
   assert.match(route, /hitsPerPage:\s*24/);
   assert.doesNotMatch(route, /quickAction|BrowserRun|cloudflare:workers/);
+});
+
+
+test("Grailed rejects measurement artwork and parses only real product photos", async (t) => {
+  const found = await compiler(t); if (!found) return;
+  const outDir = await mkdtemp(join(tmpdir(), "rml-grailed-strict-"));
+  try {
+    const input = fileURLToPath(new URL("../app/lib/marketplace-source-parsers.ts", import.meta.url));
+    const result = spawnSync(found.command, [
+      ...found.prefix, "--target", "ES2022", "--module", "commonjs", "--moduleResolution", "node",
+      "--outDir", outDir, input,
+    ], { encoding: "utf8" });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    await writeFile(join(outDir, "package.json"), '{"type":"commonjs"}\n');
+    const require = createRequire(import.meta.url);
+    const parser = require(join(outDir, "marketplace-source-parsers.js"));
+
+    const measurement = {
+      id: 1,
+      name: "chest",
+      display_name: "Chest",
+      image_url: "https://media-assets.grailed.com/prd/measurement-type/7d2e595338f44b6a93f0143738599c9d",
+      buyer_description: "Measured straight across from armpit to armpit.",
+    };
+    assert.equal(parser.isGrailedListingRecord(measurement), false);
+    assert.equal(parser.grailedHitToRecord(measurement, "active"), null);
+    assert.equal(parser.isGrailedListingImageUrl(measurement.image_url), false);
+    assert.equal(parser.isGrailedListingImageUrl("https://media-assets.grailed.com/prd/misc/homepage.jpg"), false);
+
+    const listingPhoto = "https://media-assets.grailed.com/prd/listing/94344907/real-photo-asset";
+    assert.equal(parser.isGrailedListingImageUrl(listingPhoto), true);
+    const nextData = {
+      props: {
+        pageProps: {
+          listing: {
+            id: 94344907,
+            title: "Supreme Box Logo Hoodie",
+            prettyPath: "/listings/94344907-supreme-box-logo-hoodie",
+            price: 275,
+            sold: false,
+            condition: "gently_used",
+            prettySize: "US M / EU 48-50 / 2",
+            designerNames: "Supreme",
+            description: "Authentic Supreme hoodie.",
+            photos: [{ id: 9, url: listingPhoto, width: 1200, height: 1600 }],
+            shipping: { us: { enabled: true, amount: 15 } },
+          },
+        },
+      },
+    };
+    const html = `<!doctype html><html><head>
+      <meta property="og:image" content="https://media-assets.grailed.com/prd/measurement-type/bad">
+      <script>window.PUBLIC_CONFIG={"measurementTypes":[${JSON.stringify(measurement)}]}</script>
+      <script id="__NEXT_DATA__" type="application/json">${JSON.stringify(nextData)}</script>
+    </head><body></body></html>`;
+    const product = parser.parseGrailedProductPageSource(
+      html,
+      "https://www.grailed.com/listings/94344907-supreme-box-logo-hoodie",
+    );
+    assert.ok(product);
+    assert.equal(product.title, "Supreme Box Logo Hoodie");
+    assert.equal(product.price, 275);
+    assert.equal(product.brand, "Supreme");
+    assert.equal(product.image, listingPhoto);
+    assert.doesNotMatch(product.image, /measurement-type|misc|placeholder/);
+  } finally { await rm(outDir, { recursive: true, force: true }); }
 });

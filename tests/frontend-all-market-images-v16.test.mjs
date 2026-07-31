@@ -53,7 +53,7 @@ test("Grailed nested cover photos produce an analysis-ready image", async (t) =>
       objectID: "12345",
       title: "Supreme Box Logo Hoodie",
       price: 220,
-      cover_photo: { large: { url: "https://media-assets.grailed.com/prd/listing/hoodie.jpg" } },
+      cover_photo: { large: { url: "https://media-assets.grailed.com/prd/listing/12345/hoodie.jpg" } },
       designers: [{ name: "Supreme" }],
     }, "active");
     assert.match(record.image, /media-assets\.grailed\.com/);

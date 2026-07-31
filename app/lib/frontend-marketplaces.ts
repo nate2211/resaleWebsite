@@ -15,8 +15,11 @@ import { parseZenMarketPageSource, zenMarketCanonicalUrl, zenMarketCatalogRecord
 import {
   GRAILED_PUBLIC_CONFIG_FALLBACK,
   grailedHitToRecord,
+  isGrailedListingImageUrl,
+  isGrailedListingRecord,
   parseDepopProductPageSource,
   parseDepopReaderMarkdown,
+  parseGrailedProductPageSource,
   parseGrailedPublicConfig,
   type GrailedPublicConfig,
 } from "./marketplace-source-parsers";
@@ -549,6 +552,7 @@ function marketplaceRecordWithUrl(
   if (!id) return enriched;
 
   if (marketplace === "Grailed") {
+    if (!isGrailedListingRecord(enriched)) return enriched;
     const slug = recordText(enriched, ["slug"]);
     enriched.url = `/listings/${id}${slug ? `-${slug.replace(new RegExp(`^${id}-?`), "")}` : ""}`;
   } else if (marketplace === "Mercari Japan"
@@ -637,12 +641,7 @@ function marketplaceImage(value: string, marketplace: Marketplace, base: string)
       if (!/(?:media-photos|media|images)\.depop\.com$/.test(host) && !host.endsWith(".depop.com")) return "";
     }
     if (marketplace === "Grailed") {
-      if (/(?:logo|favicon|avatar|badge|misc)/.test(path)) return "";
-      const grailedImageHost = [
-        "media-assets.grailed.com", "media.grailed.com", "cdn-images.grailed.com",
-        "images.grailed.com", "process.fs.grailed.com",
-      ].some((domain) => host === domain || host.endsWith(`.${domain}`));
-      if (!grailedImageHost) return "";
+      if (!isGrailedListingImageUrl(parsed.toString())) return "";
     }
     return parsed.toString();
   } catch {
@@ -651,6 +650,7 @@ function marketplaceImage(value: string, marketplace: Marketplace, base: string)
 }
 
 function partialFromRecord(record: Record<string, unknown>, marketplace: Marketplace, base: string) {
+  if (marketplace === "Grailed" && !isGrailedListingRecord(record)) return null;
   const enriched = marketplaceRecordWithUrl(record, marketplace);
   const normalized = normalizePublicListingRecord(enriched, marketplace, base);
   if (!normalized) return null;
@@ -678,6 +678,17 @@ function partialFromRecord(record: Record<string, unknown>, marketplace: Marketp
     ].filter(Boolean).join(" "),
     live: true,
   } satisfies Partial<Listing>;
+}
+
+function isCompleteGrailedListing(listing: Partial<Listing>) {
+  const url = canonicalListingUrl(String(listing.url || ""), "Grailed", "https://www.grailed.com/");
+  const title = String(listing.title || "").trim();
+  const image = String(listing.image || "").trim();
+  return Boolean(url)
+    && title.length >= 3
+    && !/^(?:grailed|marketplace|untitled|listing)(?: listing)?$/i.test(title)
+    && Number(listing.price) > 0
+    && isGrailedListingImageUrl(image);
 }
 
 function recordsFromJson(value: unknown, marketplace: Marketplace, base: string) {
@@ -836,6 +847,7 @@ function listingFromAnchor(anchor: HTMLAnchorElement, marketplace: Marketplace, 
   const brand = textFromSelector(container, "[class*='brand'],[data-testid*='brand']") || "Unspecified";
   const size = textFromSelector(container, "[class*='size'],[data-testid*='size']") || "Unknown";
   const conditionText = textFromSelector(container, "[class*='condition'],[data-testid*='condition']");
+  if (marketplace === "Grailed" && (!image || price <= 0 || /^(?:grailed|listing)$/i.test(title))) return null;
   return {
     id: `${marketplace}-${url}`,
     marketplace,
@@ -894,6 +906,7 @@ function parseEmbeddedSourceLinks(source: string, marketplace: Marketplace, base
       || context.match(/<img\b[^>]*(?:src|data-src|data-original)\s*=\s*"([^"]+)"/i)?.[1]
       || "";
     const image = marketplaceImage(imageRaw, marketplace, base);
+    if (marketplace === "Grailed" && (!image || !priceInfo.amount || /^(?:grailed|grailed listing|listing)$/i.test(title))) continue;
     output.push({
       id: `${marketplace}-${url}`,
       marketplace,
@@ -974,7 +987,7 @@ function grailedAlgoliaListings(text: string, mode: "active" | "sold", base: str
       .map((hit) => grailedHitToRecord(hit, mode))
       .filter(Boolean)
       .map((record) => partialFromRecord(record as Record<string, unknown>, "Grailed", base))
-      .filter(Boolean) as Partial<Listing>[];
+      .filter((listing): listing is Partial<Listing> => Boolean(listing) && isCompleteGrailedListing(listing as Partial<Listing>));
   } catch {
     return [] as Partial<Listing>[];
   }
@@ -997,6 +1010,7 @@ function parseMarkdown(text: string, marketplace: Marketplace, base: string) {
     const nearestImage = images
       .map((entry) => ({ ...entry, distance: Math.abs(entry.index - (match.index || 0)) }))
       .sort((a, b) => a.distance - b.distance)[0]?.url || "";
+    if (marketplace === "Grailed" && (!nearestImage || !publicPrice.amount)) continue;
     output.push({
       id: `${marketplace}-${url}`,
       marketplace,
@@ -1033,6 +1047,13 @@ function parseResponse(response: TextResponse, marketplace: Marketplace) {
       }
     }
   }
+  if (marketplace === "Grailed") {
+    const product = parseGrailedProductPageSource(source, response.url);
+    if (product) {
+      const listing = partialFromRecord(product as Record<string, unknown>, "Grailed", response.url);
+      if (listing && isCompleteGrailedListing(listing)) output.push(listing);
+    }
+  }
   if (/json/i.test(response.contentType) || /^[\[{]/.test(source)) {
     try {
       let payload: unknown = JSON.parse(source);
@@ -1066,7 +1087,7 @@ function parseResponse(response: TextResponse, marketplace: Marketplace) {
   // Always inspect serialized/escaped product paths. React HTML often contains
   // valid listing records even when no matching anchor is server-rendered.
   output.push(...parseEmbeddedSourceLinks(normalizedSource, marketplace, response.url));
-  return output;
+  return marketplace === "Grailed" ? output.filter(isCompleteGrailedListing) : output;
 }
 
 function dedupeListings(values: Partial<Listing>[], limit = 40) {
@@ -1259,7 +1280,7 @@ export async function searchMarketplaceFrontend(input: {
   }
 
   const hasGrailedPageCards = marketplace === "Grailed"
-    && values.some((entry) => entry.listings.length > 0);
+    && values.some((entry) => entry.listings.some(isCompleteGrailedListing));
   if (marketplace === "Grailed" && !hasGrailedPageCards) {
     const config = values.map((entry) => parseGrailedPublicConfig(entry.response.text)).find(Boolean)
       || GRAILED_PUBLIC_CONFIG_FALLBACK;
@@ -1281,7 +1302,9 @@ export async function searchMarketplaceFrontend(input: {
     maxCandidates: allMarketsMode ? 1 : 4,
     maxWorkers: allMarketsMode ? 1 : 3,
   });
-  const listings = dedupeListings(hydrated.listings);
+  const listings = marketplace === "Grailed"
+    ? dedupeListings(hydrated.listings).filter(isCompleteGrailedListing)
+    : dedupeListings(hydrated.listings);
   const transport = [...new Set([
     ...values.flatMap((entry) => entry.responses.map((response) => response.transport)),
     ...hydrated.transports,

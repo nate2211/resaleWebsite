@@ -169,6 +169,26 @@ const VIEWS: { id: View; label: string }[] = [
 
 const FALLBACK_IMAGE = "/listing-placeholder.svg";
 
+function isRealGrailedCardData(listing: Partial<Listing>) {
+  if (listing.marketplace !== "Grailed") return true;
+  const title = String(listing.title || "").trim();
+  const image = String(listing.image || "").trim();
+  try {
+    const listingUrl = new URL(String(listing.url || ""), "https://www.grailed.com/");
+    const imageUrl = new URL(image);
+    return /(^|\.)grailed\.com$/i.test(listingUrl.hostname)
+      && /^\/listings\/\d+(?:-|\/|$)/i.test(listingUrl.pathname)
+      && imageUrl.hostname.toLowerCase() === "media-assets.grailed.com"
+      && /^\/prd\/listing\/\d+\/[a-z0-9_-]+/i.test(imageUrl.pathname)
+      && !/measurement(?:-type)?|\/prd\/misc\/|placeholder|logo|favicon|avatar|badge/i.test(imageUrl.pathname)
+      && title.length >= 3
+      && !/^(?:grailed|listing|untitled listing|marketplace listing)$/i.test(title)
+      && Number(listing.price) > 0;
+  } catch {
+    return false;
+  }
+}
+
 function listingImageSource(listing: Listing) {
   if (!listing.image) return FALLBACK_IMAGE;
   try {
@@ -3412,7 +3432,7 @@ function BrowseView({
       );
       // Map preserves first-seen order: existing listings stay in place and each
       // newly discovered URL is appended after the current result set.
-      const raw = [...previous, ...incoming];
+      const raw = [...previous, ...incoming].filter(isRealGrailedCardData);
       const unique = [...new Map(raw.map((item) => [String(item.url || item.id), item])).values()];
       const enriched = unique.map((item) => {
         const marketplace = MARKETPLACES.includes(item.marketplace as Marketplace)
