@@ -76,6 +76,8 @@ export function parseDepopProductPageSource(source: string, pageUrl: string): De
     || normalized.match(/(?:Buyer Protection[^\n]*\n+[-*\s]*)([\s\S]{20,1600}?)(?:\n[-*\s]*Visit shop|\n## More from this seller)/i)?.[1]
     || normalized,
   ).slice(0, 1200);
+  if (!isDepopListingImageUrl(image) || price <= 0
+    || !title || /^(?:depop|depop listing|marketplace listing|untitled listing)$/i.test(title)) return null;
   return {
     url,
     title: title || "Depop listing",
@@ -117,11 +119,32 @@ function cleanText(value: string) {
     .trim();
 }
 
+
+function isDepopProductSlug(slug: string) {
+  const normalized = slug.trim().toLowerCase();
+  return normalized.length >= 10
+    && normalized.includes("-")
+    && /-[a-z0-9]{4,12}$/.test(normalized)
+    && !/^(?:create|login|signup|search)$/.test(normalized);
+}
+
+export function isDepopListingImageUrl(value: string) {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "https:"
+      && parsed.hostname.toLowerCase() === "media-photos.depop.com"
+      && !/(?:placeholder|fallback|loading|logo|favicon|avatar|badge|qr[-_]?code)/i.test(parsed.pathname);
+  } catch {
+    return false;
+  }
+}
+
 function canonicalDepopUrl(value: string) {
   try {
     const parsed = new URL(value, "https://www.depop.com/");
     if (!/(^|\.)depop\.com$/i.test(parsed.hostname)) return "";
-    if (!/^\/products\/[^/]+\/?$/i.test(parsed.pathname)) return "";
+    const slug = parsed.pathname.match(/^\/products\/([^/]+)\/?$/i)?.[1] || "";
+    if (!isDepopProductSlug(slug)) return "";
     parsed.search = "";
     parsed.hash = "";
     if (!parsed.pathname.endsWith("/")) parsed.pathname += "/";
@@ -300,7 +323,7 @@ export function isGrailedListingImageUrl(value: string) {
     }
     // Current first-party listing photos use /prd/listing/<listing id>/<asset id>.
     // Older hosts are accepted only when their path still contains /listing/.
-    return /\/prd\/listing\/\d+\/[a-z0-9_-]+/i.test(path)
+    return /\/prd\/listing\/(?:\d+|temp)\/[a-z0-9_-]+/i.test(path)
       || /\/listing\/\d+\/[a-z0-9_-]+/i.test(path);
   } catch {
     return false;

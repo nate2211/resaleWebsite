@@ -3,14 +3,16 @@ export const runtime = "edge";
 export async function GET() {
   return Response.json({
     ok: true,
-    revision: "market-search-zenmarket-grailed-posts-v24",
+    revision: "market-search-bounded-pagination-v25",
     marketplaceRequests: "frontend-api-depop-parallel-recovery",
     grailedSearch: "strict-public-index-and-product-page-parser",
     grailedCardValidation: "canonical-url-positive-price-real-listing-photo",
     grailedImagePolicy: "prd-listing-only-no-measurement-misc-placeholder",
     browserBindingAvailable: false,
     cloudflareMarketplaceFetches: "parallel-depop-ssr-api-reader-index-recovery",
-    grailedPublicIndexFetches: "one-bounded-json-request-per-search",
+    grailedPublicIndexFetches: "one-40-hit-json-page-per-active-or-sold-search",
+    marketplacePagination: "append-unique-pages-up-to-20",
+    depopCardValidation: "listing-slug-positive-price-media-photos-only",
     productionDomain: "resalemasterlab.cloud-cord.com",
     navigation: "complete-sticky-responsive-menu",
     marketplaceBatchSize: { standard: 3, allMarkets: 2 },

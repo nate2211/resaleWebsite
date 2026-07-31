@@ -67,7 +67,7 @@ test("a mocked Depop 403 is replaced by readable product cards", async (t) => {
       if (value.startsWith("https://r.jina.ai/")) {
         return new Response(JSON.stringify({ data: {
           content: "Supreme Box Logo Tee\nM\n$55.00",
-          links: [{ text: "Supreme Box Logo Tee", url: "https://www.depop.com/products/seller-supreme-box-logo-tee/" }],
+          links: [{ text: "Supreme Box Logo Tee", url: "https://www.depop.com/products/seller-supreme-box-logo-tee-a1b2/" }],
         } }), { status: 200, headers: { "content-type": "application/json" } });
       }
       if (value.includes("bing.com/search") || value.includes("duckduckgo.com/html")) {
@@ -81,7 +81,7 @@ test("a mocked Depop 403 is replaced by readable product cards", async (t) => {
     const body = await response.text();
     assert.equal(response.status, 200);
     assert.equal(response.headers.get("x-rml-recovery-transport"), "depop-reader");
-    assert.match(body, /depop\.com\/products\/seller-supreme/);
+    assert.match(body, /depop\.com\/products\/seller-supreme-box-logo-tee-a1b2/);
     assert.doesNotMatch(body, /not authorized|403 forbidden/i);
     assert.ok(calls >= 3);
 
@@ -98,10 +98,11 @@ test("a mocked Depop 403 is replaced by readable product cards", async (t) => {
   }
 });
 
-test("Grailed public-index fallback only runs when page capture found no cards", async () => {
+test("Grailed always requests one bounded public-index page for active and sold counts", async () => {
   const client = await source("app/lib/frontend-marketplaces.ts");
-  assert.match(client, /const hasGrailedPageCards = marketplace === "Grailed"/);
-  assert.match(client, /if \(marketplace === "Grailed" && !hasGrailedPageCards\)/);
+  assert.match(client, /if \(marketplace === "Grailed"\)/);
+  assert.match(client, /frontendGrailedAlgoliaFetch\(config, query, page, mode/);
+  assert.doesNotMatch(client, /hasGrailedPageCards/);
 });
 
 test("known CORS-blocked hosts are not fetched directly from the page", async () => {
@@ -123,7 +124,7 @@ test("the Browser Bridge extension was removed", async () => {
 test("health and deployment identify frontend-API recovery", async () => {
   const health = await source("app/api/health/route.ts");
   const wrangler = await source("wrangler.jsonc");
-  assert.match(health, /market-search-zenmarket-grailed-posts-v24/);
+  assert.match(health, /market-search-bounded-pagination-v25/);
   assert.match(health, /frontend-api-depop-parallel-recovery/);
   assert.match(wrangler, /frontend-api-depop-parallel-recovery/);
   assert.doesNotMatch(wrangler, /"browser"\s*:/i);

@@ -58,7 +58,7 @@ export async function GET(request: Request) {
   try {
     const upstream = await fetch(source, {
       method: "GET",
-      redirect: "error",
+      redirect: "manual",
       signal: controller.signal,
       headers: {
         accept: "image/avif,image/webp,image/png,image/jpeg,image/*;q=0.8",

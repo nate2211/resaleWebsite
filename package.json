@@ -1,6 +1,6 @@
 {
   "name": "resalemasterlab",
-  "version": "1.10.1",
+  "version": "1.11.0",
   "private": true,
   "engines": {
     "node": ">=22.13.0"
@@ -56,5 +56,5 @@
     "wrangler": "4.92.0"
   },
   "type": "module",
-  "description": "ResaleMasterLab with first-party Depop recovery, strict real-photo Grailed listings and post counts, plus ZenMarket multi-store catalog and official source-market recovery with numeric Grailed post-state fallback."
+  "description": "ResaleMasterLab with bounded 40-item marketplace pagination, strict real-image Depop and Grailed cards, active/sold Grailed index support, and ZenMarket multi-store recovery."
 }

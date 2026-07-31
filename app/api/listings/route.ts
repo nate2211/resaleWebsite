@@ -1,7 +1,7 @@
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
-const WORKER_REVISION = "market-search-zenmarket-grailed-posts-v24";
+const WORKER_REVISION = "market-search-bounded-pagination-v25";
 const MAX_BODY_BYTES = 5_500_000;
 const UPSTREAM_TIMEOUT_MS = 15_000;
 const DEPOP_ORIGIN_TIMEOUT_MS = 9_000;
@@ -271,13 +271,21 @@ function depopSearchTerm(url: URL) {
   return match ? decodeURIComponent(match[1]).replace(/[-_]+/g, " ").trim() : "";
 }
 
+function isDepopProductSlug(slug: string) {
+  const normalized = slug.trim().toLowerCase();
+  return normalized.length >= 10
+    && normalized.includes("-")
+    && /-[a-z0-9]{4,12}$/.test(normalized)
+    && !/^(?:create|login|signup|search)$/.test(normalized);
+}
+
 function canonicalDepopProduct(value: string) {
   try {
     const decoded = decodeXml(value).replace(/^view-source:/i, "");
     const parsed = new URL(decoded, "https://www.depop.com/");
     if (!isDepopProductUrl(parsed)) return "";
     const slug = parsed.pathname.match(/\/products\/([a-z0-9_-]+)/i)?.[1] || "";
-    if (!slug || slug.toLowerCase() === "create") return "";
+    if (!isDepopProductSlug(slug)) return "";
     parsed.protocol = "https:";
     parsed.hostname = "www.depop.com";
     parsed.pathname = `/products/${slug}/`;

@@ -3,10 +3,12 @@ import { grailedHitToRecord } from "../../lib/marketplace-source-parsers";
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
-const WORKER_REVISION = "market-search-zenmarket-grailed-posts-v24";
+const WORKER_REVISION = "market-search-bounded-pagination-v25";
 const TOTAL_TIMEOUT_MS = 11_000;
 const PER_HOST_TIMEOUT_MS = 3_500;
 const MAX_RESPONSE_BYTES = 2_000_000;
+const GRAILED_PAGE_SIZE = 40;
+const MAX_GRAILED_PAGE = 49;
 const ALLOWED_INDEXES = new Set(["Listing_production", "Listing_sold_production"]);
 
 type GrailedSearchBody = {
@@ -129,11 +131,13 @@ function sanitizeGrailedPayload(text: string, mode: "active" | "sold") {
   const payload = batchResults[0] && typeof batchResults[0] === "object"
     ? batchResults[0] as Record<string, unknown>
     : parsed;
-  const rawHits = Array.isArray(payload.hits) ? payload.hits.filter((value): value is Record<string, unknown> => Boolean(value) && typeof value === "object" && !Array.isArray(value)) : [];
+  const rawHits = Array.isArray(payload.hits) ? payload.hits
+    .filter((value): value is Record<string, unknown> => Boolean(value) && typeof value === "object" && !Array.isArray(value))
+    .slice(0, GRAILED_PAGE_SIZE) : [];
   const hits = rawHits.map((hit) => grailedHitToRecord(hit, mode)).filter(Boolean);
   const loadedUrls = new Set(hits.map((hit) => valueText((hit as Record<string, unknown>).url)).filter(Boolean));
   const candidates = rawHits.map(grailedHydrationCandidate)
-    .filter((value): value is NonNullable<typeof value> => Boolean(value) && !loadedUrls.has(value.url))
+    .filter((value): value is NonNullable<typeof value> => value !== null && !loadedUrls.has(value.url))
     .slice(0, 16);
   const originalTotal = Math.max(0, Number(payload.nbHits) || 0);
   const page = Math.max(0, Number(payload.page) || 0);
@@ -146,6 +150,9 @@ function sanitizeGrailedPayload(text: string, mode: "active" | "sold") {
     page,
     nbPages,
     returnedPosts: hits.length,
+    pageSize: GRAILED_PAGE_SIZE,
+    hasMore: page + 1 < nbPages,
+    nextPage: page + 1 < nbPages ? page + 1 : null,
     hydrationCandidates: candidates.length,
     filteredInvalidHits: Math.max(0, rawHits.length - hits.length - candidates.length),
     partial: false,
@@ -156,7 +163,7 @@ function algoliaParams(query: string, page: number) {
   return new URLSearchParams({
     query,
     page: String(page),
-    hitsPerPage: "24",
+    hitsPerPage: String(GRAILED_PAGE_SIZE),
     typoTolerance: "true",
     distinct: "true",
     getRankingInfo: "true",
@@ -187,7 +194,7 @@ async function requestHost(input: {
     : {
         query: input.query,
         page: input.page,
-        hitsPerPage: 24,
+        hitsPerPage: GRAILED_PAGE_SIZE,
         typoTolerance: true,
         distinct: true,
         getRankingInfo: true,
@@ -196,7 +203,7 @@ async function requestHost(input: {
   try {
     const upstream = await fetch(endpoint, {
       method: "POST",
-      redirect: "error",
+      redirect: "manual",
       cache: "no-store",
       signal: controller.signal,
       headers: {
@@ -223,7 +230,7 @@ export async function POST(request: Request) {
   catch { return invalid("The Grailed search body must be valid JSON."); }
 
   const query = typeof body.query === "string" ? body.query.trim().slice(0, 160) : "";
-  const page = Math.min(100, Math.max(0, Number.parseInt(String(body.page ?? "0"), 10) || 0));
+  const page = Math.min(MAX_GRAILED_PAGE, Math.max(0, Number.parseInt(String(body.page ?? "0"), 10) || 0));
   const mode = body.mode === "sold" ? "sold" : "active";
   const appId = typeof body.appId === "string" ? body.appId.trim() : "";
   const apiKey = typeof body.apiKey === "string" ? body.apiKey.trim() : "";
@@ -283,6 +290,9 @@ export async function POST(request: Request) {
       page,
       nbPages: 0,
       partial: true,
+      pageSize: GRAILED_PAGE_SIZE,
+      hasMore: false,
+      nextPage: null,
       recovery: "grailed-empty",
       marketplace: "Grailed",
       mode,

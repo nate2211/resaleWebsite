@@ -1,4 +1,4 @@
-# Validation — market-search-zenmarket-grailed-posts-v24
+# Validation — market-search-bounded-pagination-v25
 
 Validated behavior:
 
@@ -18,3 +18,12 @@ Validated behavior:
 - SEO, PWA, custom-domain, Thrift Check, and Listing Template validation passes.
 
 The uploaded source did not include project `node_modules`, so a complete Vinext production build was not run. An attempted `npm ci` was blocked by the environment's internal npm mirror returning 404 for `zod-validation-error@4.0.2`; the public lockfile remains intact. Public-index, challenge-page, error-envelope, canonical-link, and post-count behavior is covered by deterministic regression fixtures and the user-provided challenge captures.
+
+
+## v25 bounded pagination and strict image validation
+
+- Grailed requests exactly 40 hits per page and never loops across `nbHits`.
+- Cloudflare Edge uses `redirect: manual`, eliminating the unsupported `redirect: error` failure.
+- Active and sold Grailed indexes share the same bounded page contract and expose `hasMore`/`nextPage`.
+- Every marketplace can append subsequent pages until a page returns no new unique URLs, with a 20-page safety ceiling.
+- Depop profile-shaped `/products/<username>/` links are rejected. Only priced products with `media-photos.depop.com` imagery become cards.

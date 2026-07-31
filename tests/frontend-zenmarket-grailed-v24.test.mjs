@@ -21,7 +21,7 @@ async function compiler(t) {
 
 test("ZenMarket rejects Cloudflare/error envelopes and rebuilds normal product links from official stores", async (t) => {
   const found = await compiler(t); if (!found) return;
-  const outDir = await mkdtemp(join(tmpdir(), "rml-zen-v24-"));
+  const outDir = await mkdtemp(join(tmpdir(), "rml-zen-v25-"));
   try {
     const input = fileURLToPath(new URL("../app/lib/zenmarket-source-parsers.ts", import.meta.url));
     const result = spawnSync(found.command, [...found.prefix,
@@ -81,7 +81,7 @@ test("ZenMarket rejects Cloudflare/error envelopes and rebuilds normal product l
 
 test("Grailed uses standard Algolia hosts, returns strict cards, and preserves the post count", async (t) => {
   const found = await compiler(t); if (!found) return;
-  const outDir = await mkdtemp(join(tmpdir(), "rml-grailed-v24-"));
+  const outDir = await mkdtemp(join(tmpdir(), "rml-grailed-v25-"));
   const originalFetch = globalThis.fetch;
   try {
     const routeInput = fileURLToPath(new URL("../app/api/grailed-search/route.ts", import.meta.url));
@@ -161,7 +161,7 @@ test("frontend reports Grailed posts instead of unavailable and retains extensio
   assert.match(client, /0 Grailed posts matched this search/);
   assert.match(client, /0 Grailed posts loaded after the bounded public page and listing-index checks/);
   assert.match(client, /status: "live"[\s\S]{0,260}totalResults: 0/);
-  assert.match(page, /\$\{state\.totalResults\} posts/);
+  assert.match(page, /\$\{state\.listings\.length\} loaded \/ \$\{state\.totalResults\} found/);
   assert.match(page, /totalResults: reportedTotal/);
   assert.match(zenRoute, /parseOfficialStorePageSource/);
   assert.match(zenRoute, /join\("%2B"\)/);

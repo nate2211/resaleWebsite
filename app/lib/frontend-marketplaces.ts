@@ -15,6 +15,7 @@ import { parseZenMarketPageSource, zenMarketCanonicalUrl, zenMarketCatalogRecord
 import {
   GRAILED_PUBLIC_CONFIG_FALLBACK,
   grailedHitToRecord,
+  isDepopListingImageUrl,
   isGrailedListingImageUrl,
   isGrailedListingRecord,
   parseDepopProductPageSource,
@@ -63,6 +64,8 @@ const MAX_RESPONSE_CHARS = 5_500_000;
 const DIRECT_TIMEOUT_MS = 12_000;
 const DEPOP_FRONTEND_API_TIMEOUT_MS = 30_000;
 const READER_TIMEOUT_MS = 20_000;
+const MARKETPLACE_PAGE_SIZE = 40;
+const MAX_MARKETPLACE_PAGES = 20;
 const JINA_KEY_STORAGE = "rml:jina-reader-key";
 const MARKETPLACE_RELAY_CONCURRENCY = 3;
 let marketplaceRelayActive = 0;
@@ -336,9 +339,13 @@ function grailedSearchMeta(text: string) {
     const hits = Array.isArray(payload.hits) ? payload.hits.length : 0;
     const candidates = Array.isArray(payload.candidates) ? payload.candidates.length : 0;
     const total = Math.max(0, Number(payload.nbHits) || 0);
-    return { total, hits, candidates, partial: payload.partial === true };
+    const page = Math.max(0, Number(payload.page) || 0);
+    const nbPages = Math.max(0, Number(payload.nbPages) || 0);
+    const pageSize = Math.max(1, Number(payload.pageSize) || MARKETPLACE_PAGE_SIZE);
+    const hasMore = typeof payload.hasMore === "boolean" ? payload.hasMore : page + 1 < nbPages;
+    return { total, hits, candidates, page, nbPages, pageSize, hasMore, partial: payload.partial === true };
   } catch {
-    return { total: 0, hits: 0, candidates: 0, partial: true };
+    return { total: 0, hits: 0, candidates: 0, page: 0, nbPages: 0, pageSize: MARKETPLACE_PAGE_SIZE, hasMore: false, partial: true };
   }
 }
 
@@ -346,7 +353,7 @@ function grailedAlgoliaParams(query: string, page: number) {
   return new URLSearchParams({
     query,
     page: String(page),
-    hitsPerPage: "24",
+    hitsPerPage: String(MARKETPLACE_PAGE_SIZE),
     typoTolerance: "true",
     distinct: "true",
     getRankingInfo: "true",
@@ -685,7 +692,8 @@ function canonicalListingUrl(value: string, marketplace: Marketplace, base: stri
     const hostMatches = (domain: string) => host === domain || host.endsWith(`.${domain}`);
 
     if (marketplace === "Depop") {
-      if (!hostMatches("depop.com") || !/^\/products\/[^/]+\/?$/i.test(path)) return "";
+      const slug = path.match(/^\/products\/([^/]+)\/?$/i)?.[1] || "";
+      if (!hostMatches("depop.com") || !slug.includes("-") || !/-[a-z0-9]{4,12}$/i.test(slug)) return "";
       parsed.search = "";
       parsed.hash = "";
       if (!parsed.pathname.endsWith("/")) parsed.pathname += "/";
@@ -740,8 +748,7 @@ function marketplaceImage(value: string, marketplace: Marketplace, base: string)
     const host = parsed.hostname.toLowerCase();
     const path = parsed.pathname.toLowerCase();
     if (marketplace === "Depop") {
-      if (/assets\.depop\.com/.test(host) || /(?:logo|favicon|qr|avatar|badge)/.test(path)) return "";
-      if (!/(?:media-photos|media|images)\.depop\.com$/.test(host) && !host.endsWith(".depop.com")) return "";
+      if (!isDepopListingImageUrl(parsed.toString())) return "";
     }
     if (marketplace === "Grailed") {
       if (!isGrailedListingImageUrl(parsed.toString())) return "";
@@ -781,6 +788,17 @@ function partialFromRecord(record: Record<string, unknown>, marketplace: Marketp
     ].filter(Boolean).join(" "),
     live: true,
   } satisfies Partial<Listing>;
+}
+
+function isCompleteDepopListing(listing: Partial<Listing>) {
+  const url = canonicalListingUrl(String(listing.url || ""), "Depop", "https://www.depop.com/");
+  const title = String(listing.title || "").trim();
+  const image = String(listing.image || "").trim();
+  return Boolean(url)
+    && title.length >= 3
+    && !/^(?:depop|depop listing|marketplace listing|untitled listing)$/i.test(title)
+    && Number(listing.price) > 0
+    && isDepopListingImageUrl(image);
 }
 
 function isCompleteGrailedListing(listing: Partial<Listing>) {
@@ -1391,6 +1409,7 @@ export async function searchMarketplaceFrontend(input: {
   const values: Array<{ response: TextResponse; responses: TextResponse[]; listings: Partial<Listing>[] }> = [];
   const rejected: string[] = [];
   let grailedReportedResults: number | undefined;
+  let grailedHasMore = false;
   let grailedSearchCompleted = false;
 
   // ZenMarket's catalog response is compact and already contains paired item
@@ -1428,9 +1447,7 @@ export async function searchMarketplaceFrontend(input: {
     }
   }
 
-  const hasGrailedPageCards = marketplace === "Grailed"
-    && values.some((entry) => entry.listings.some(isCompleteGrailedListing));
-  if (marketplace === "Grailed" && !hasGrailedPageCards) {
+  if (marketplace === "Grailed") {
     const config = values.map((entry) => parseGrailedPublicConfig(entry.response.text)).find(Boolean)
       || GRAILED_PUBLIC_CONFIG_FALLBACK;
     try {
@@ -1439,6 +1456,7 @@ export async function searchMarketplaceFrontend(input: {
       if (!meta.partial) {
         grailedSearchCompleted = true;
         grailedReportedResults = meta.total;
+        grailedHasMore = meta.hasMore;
       }
       const listings = algoliaResponse.ok
         ? grailedAlgoliaListings(algoliaResponse.text, mode, algoliaResponse.url) : [];
@@ -1456,12 +1474,14 @@ export async function searchMarketplaceFrontend(input: {
   const hydrated = await hydrateListingPages(searchListings, marketplace, signal, {
     // Grailed index candidates are hydrated through their official /listings/
     // pages when the public index omits a usable first product photo.
-    maxCandidates: allMarketsMode ? 2 : marketplace === "Grailed" ? 10 : 4,
+    maxCandidates: allMarketsMode ? 2 : marketplace === "Grailed" ? 8 : marketplace === "Depop" ? 12 : 4,
     maxWorkers: allMarketsMode ? 1 : 3,
   });
   const listings = marketplace === "Grailed"
-    ? dedupeListings(hydrated.listings).filter(isCompleteGrailedListing)
-    : dedupeListings(hydrated.listings);
+    ? dedupeListings(hydrated.listings, MARKETPLACE_PAGE_SIZE).filter(isCompleteGrailedListing)
+    : marketplace === "Depop"
+      ? dedupeListings(hydrated.listings, MARKETPLACE_PAGE_SIZE).filter(isCompleteDepopListing)
+      : dedupeListings(hydrated.listings, MARKETPLACE_PAGE_SIZE);
   const transport = [...new Set([
     ...values.flatMap((entry) => entry.responses.map((response) => response.transport)),
     ...hydrated.transports,
@@ -1476,11 +1496,11 @@ export async function searchMarketplaceFrontend(input: {
       marketplace,
       status: "live",
       message: marketplace === "Grailed"
-        ? `${reported} Grailed post${reported === 1 ? "" : "s"} found · ${listings.length} real product card${listings.length === 1 ? "" : "s"} loaded${hydrated.hydrated ? ` · ${hydrated.hydrated} product page${hydrated.hydrated === 1 ? "" : "s"} hydrated` : ""}.`
+        ? `Loaded ${listings.length} of ${reported} matching Grailed post${reported === 1 ? "" : "s"} on page ${page + 1}${hydrated.hydrated ? ` · ${hydrated.hydrated} product page${hydrated.hydrated === 1 ? "" : "s"} hydrated` : ""}.`
         : `Loaded ${listings.length} real listing${listings.length === 1 ? "" : "s"} through the frontend marketplace API and official public page sources${readerFallbackUsed ? " with readable-page recovery" : ""}${hydrated.hydrated ? `; enriched ${hydrated.hydrated} product page${hydrated.hydrated === 1 ? "" : "s"}` : ""}.`,
       sourceUrl,
       listings,
-      hasMore: marketplace === "Grailed" ? Boolean(reported && reported > (page + 1) * 24) : listings.length >= 20,
+      hasMore: marketplace === "Grailed" ? grailedHasMore : listings.length > 0 && page + 1 < MAX_MARKETPLACE_PAGES,
       totalResults: reported,
       diagnostics: {
         transport,

@@ -88,7 +88,7 @@ test("frontend uses Grailed public-index relay and parse-aware Depop reader fall
   assert.match(route, /algolia\.net|algolianet\.com/);
   assert.match(route, /partial:\s*true/);
   assert.match(route, /Listing_sold_production/);
-  assert.match(route, /hitsPerPage:\s*24/);
+  assert.match(route, /hitsPerPage:\s*(?:GRAILED_PAGE_SIZE|40)/);
   assert.doesNotMatch(route, /quickAction|BrowserRun|cloudflare:workers/);
 });
 
@@ -118,6 +118,7 @@ test("Grailed rejects measurement artwork and parses only real product photos", 
     assert.equal(parser.grailedHitToRecord(measurement, "active"), null);
     assert.equal(parser.isGrailedListingImageUrl(measurement.image_url), false);
     assert.equal(parser.isGrailedListingImageUrl("https://media-assets.grailed.com/prd/misc/homepage.jpg"), false);
+    assert.equal(parser.isGrailedListingImageUrl("https://media-assets.grailed.com/prd/listing/temp/real-current-photo"), true);
 
     const listingPhoto = "https://media-assets.grailed.com/prd/listing/94344907/real-photo-asset";
     assert.equal(parser.isGrailedListingImageUrl(listingPhoto), true);

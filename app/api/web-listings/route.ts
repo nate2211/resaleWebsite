@@ -7,7 +7,7 @@ export async function POST() {
     listings: [],
     searches: [],
     frontendOnly: true,
-    workerRevision: "market-search-zenmarket-grailed-posts-v24",
+    workerRevision: "market-search-bounded-pagination-v25",
   }, {
     status: 410,
     headers: { "cache-control": "no-store" },

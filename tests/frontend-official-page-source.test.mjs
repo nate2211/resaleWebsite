@@ -32,14 +32,14 @@ test("parses structured page state and hydrates only missing listing fields", as
   assert.match(client, /jsonPayloadsFromScript/);
   assert.match(client, /canonicalListingUrl/);
   assert.match(client, /hydrateListingPages/);
-  assert.match(client, /maxCandidates: allMarketsMode \? 2 : marketplace === "Grailed" \? 10 : 4/);
+  assert.match(client, /maxCandidates: allMarketsMode \? 2 : marketplace === "Grailed" \? 8 : marketplace === "Depop" \? 12 : 4/);
   assert.match(client, /length: Math\.min\(maxWorkers, candidates\.length\)/);
   assert.match(client, /Promise\.allSettled\(workers\)/);
 });
 
 test("relay returns official or recovered page source with upstream metadata", async () => {
   const route = await source("app/api/listings/route.ts");
-  assert.match(route, /market-search-zenmarket-grailed-posts-v24/);
+  assert.match(route, /market-search-bounded-pagination-v25/);
   assert.match(route, /x-rml-upstream-status/);
   assert.match(route, /x-rml-final-url/);
   assert.match(route, /x-rml-upstream-content-type/);

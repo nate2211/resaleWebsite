@@ -171,16 +171,32 @@ const VIEWS: { id: View; label: string }[] = [
 const FALLBACK_IMAGE = "/listing-placeholder.svg";
 
 function isRealGrailedCardData(listing: Partial<Listing>) {
-  if (listing.marketplace !== "Grailed") return true;
   const title = String(listing.title || "").trim();
   const image = String(listing.image || "").trim();
+  if (listing.marketplace === "Depop") {
+    try {
+      const listingUrl = new URL(String(listing.url || ""), "https://www.depop.com/");
+      const imageUrl = new URL(image);
+      const slug = listingUrl.pathname.match(/^\/products\/([^/]+)\/?$/i)?.[1] || "";
+      return /(^|\.)depop\.com$/i.test(listingUrl.hostname)
+        && slug.includes("-") && /-[a-z0-9]{4,12}$/i.test(slug)
+        && imageUrl.hostname.toLowerCase() === "media-photos.depop.com"
+        && !/placeholder|fallback|loading|logo|favicon|avatar|badge|qr[-_]?code/i.test(imageUrl.pathname)
+        && title.length >= 3
+        && !/^(?:depop|depop listing|listing|untitled listing|marketplace listing)$/i.test(title)
+        && Number(listing.price) > 0;
+    } catch {
+      return false;
+    }
+  }
+  if (listing.marketplace !== "Grailed") return true;
   try {
     const listingUrl = new URL(String(listing.url || ""), "https://www.grailed.com/");
     const imageUrl = new URL(image);
     return /(^|\.)grailed\.com$/i.test(listingUrl.hostname)
       && /^\/listings\/\d+(?:-|\/|$)/i.test(listingUrl.pathname)
       && imageUrl.hostname.toLowerCase() === "media-assets.grailed.com"
-      && /^\/prd\/listing\/\d+\/[a-z0-9_-]+/i.test(imageUrl.pathname)
+      && /^\/prd\/listing\/(?:\d+|temp)\/[a-z0-9_-]+/i.test(imageUrl.pathname)
       && !/measurement(?:-type)?|\/prd\/misc\/|placeholder|logo|favicon|avatar|badge/i.test(imageUrl.pathname)
       && title.length >= 3
       && !/^(?:grailed|listing|untitled listing|marketplace listing)$/i.test(title)
@@ -3345,7 +3361,7 @@ function BrowseView({
           .flatMap((entry) => Array.isArray(entry.listings) ? entry.listings : [])
           .filter((listing): listing is Partial<Listing> => Boolean(listing) && typeof listing === "object")
           .map((listing, index) => [String(listing.url || listing.id || `${marketplace}-${requestedPage}-${index}`), listing]))
-          .values()];
+          .values()].slice(0, 40);
         const totals = values.map((entry) => Number(entry.totalResults)).filter((value) => Number.isFinite(value) && value >= 0);
         const reportedTotal = totals.length ? Math.max(...totals) : undefined;
         const hasCompletedCount = values.some((entry) => entry.status === "live" && entry.totalResults !== undefined);
@@ -3358,7 +3374,7 @@ function BrowseView({
               : first.status ?? "live";
         const message = mergedListings.length
           ? marketplace === "Grailed" && reportedTotal !== undefined
-            ? `${reportedTotal} Grailed post${reportedTotal === 1 ? "" : "s"} found · ${mergedListings.length} real product card${mergedListings.length === 1 ? "" : "s"} loaded.`
+            ? `${mergedListings.length} Grailed post${mergedListings.length === 1 ? "" : "s"} loaded on page ${requestedPage + 1} · ${reportedTotal} matching posts available.`
             : first.message || `${mergedListings.length} listing${mergedListings.length === 1 ? "" : "s"} loaded.`
           : hasCompletedCount && marketplace === "Grailed"
             ? `${reportedTotal ?? 0} Grailed post${reportedTotal === 1 ? "" : "s"} found for this search.`
@@ -3655,7 +3671,7 @@ function BrowseView({
           <span className={`live-badge ${state?.status}`}>
             {state?.status === "live"
               ? marketplace === "Grailed" && state.totalResults !== undefined
-                ? `${state.totalResults} posts`
+                ? `${state.listings.length} loaded / ${state.totalResults} found`
                 : `${state.listings.length} loaded`
               : state?.status}
           </span>
@@ -4031,7 +4047,7 @@ function BrowseView({
           {liveState.some((entry) => entry.hasMore) && (
             <div className="load-more-row">
               <button type="button" className="secondary-button"
-                onClick={() => { void loadRealListings(true); }} disabled={loading || page >= 4}>
+                onClick={() => { void loadRealListings(true); }} disabled={loading || page >= 19}>
                 {loading ? "Loading and appending…" : `Load more listings · next page ${page + 2}`}
               </button>
             </div>
