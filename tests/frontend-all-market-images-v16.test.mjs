@@ -27,7 +27,7 @@ test("all-market mode is bounded and does not multiply query variations", async 
   assert.match(page, /allMarketsMode \? \[literalQuery\]/);
   assert.match(page, /scanMode: allMarketsMode \? "all-markets" : "standard"/);
   assert.match(client, /MARKETPLACE_RELAY_CONCURRENCY = 3/);
-  assert.match(client, /maxCandidates: allMarketsMode \? 1 : 4/);
+  assert.match(client, /maxCandidates: allMarketsMode \? 2 : marketplace === "Grailed" \? 10 : 4/);
   assert.match(client, /maxWorkers: allMarketsMode \? 1 : 3/);
 });
 

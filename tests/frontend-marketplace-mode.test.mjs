@@ -123,7 +123,7 @@ test("the Browser Bridge extension was removed", async () => {
 test("health and deployment identify frontend-API recovery", async () => {
   const health = await source("app/api/health/route.ts");
   const wrangler = await source("wrangler.jsonc");
-  assert.match(health, /market-search-grailed-real-listings-v22/);
+  assert.match(health, /market-search-zenmarket-grailed-posts-v24/);
   assert.match(health, /frontend-api-depop-parallel-recovery/);
   assert.match(wrangler, /frontend-api-depop-parallel-recovery/);
   assert.doesNotMatch(wrangler, /"browser"\s*:/i);

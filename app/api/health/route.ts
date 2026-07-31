@@ -3,7 +3,7 @@ export const runtime = "edge";
 export async function GET() {
   return Response.json({
     ok: true,
-    revision: "market-search-grailed-real-listings-v22",
+    revision: "market-search-zenmarket-grailed-posts-v24",
     marketplaceRequests: "frontend-api-depop-parallel-recovery",
     grailedSearch: "strict-public-index-and-product-page-parser",
     grailedCardValidation: "canonical-url-positive-price-real-listing-photo",

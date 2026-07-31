@@ -106,6 +106,7 @@ type LiveState = {
   sourceUrl: string;
   listings: Listing[];
   hasMore: boolean;
+  totalResults?: number;
 };
 
 type DraftListing = {
@@ -3345,16 +3346,25 @@ function BrowseView({
           .filter((listing): listing is Partial<Listing> => Boolean(listing) && typeof listing === "object")
           .map((listing, index) => [String(listing.url || listing.id || `${marketplace}-${requestedPage}-${index}`), listing]))
           .values()];
+        const totals = values.map((entry) => Number(entry.totalResults)).filter((value) => Number.isFinite(value) && value >= 0);
+        const reportedTotal = totals.length ? Math.max(...totals) : undefined;
+        const hasCompletedCount = values.some((entry) => entry.status === "live" && entry.totalResults !== undefined);
         const status = mergedListings.length
           ? "live" as const
-          : values.some((entry) => entry.status === "unavailable")
-            ? "unavailable" as const
-            : first.status ?? "live";
+          : hasCompletedCount
+            ? "live" as const
+            : values.some((entry) => entry.status === "unavailable")
+              ? "unavailable" as const
+              : first.status ?? "live";
         const message = mergedListings.length
-          ? first.message || `${mergedListings.length} listing${mergedListings.length === 1 ? "" : "s"} loaded.`
-          : failures.length
-            ? `${first.message || "No readable listings returned."} ${failures.length} query request${failures.length === 1 ? "" : "s"} failed.`
-            : first.message || "No readable listings returned.";
+          ? marketplace === "Grailed" && reportedTotal !== undefined
+            ? `${reportedTotal} Grailed post${reportedTotal === 1 ? "" : "s"} found · ${mergedListings.length} real product card${mergedListings.length === 1 ? "" : "s"} loaded.`
+            : first.message || `${mergedListings.length} listing${mergedListings.length === 1 ? "" : "s"} loaded.`
+          : hasCompletedCount && marketplace === "Grailed"
+            ? `${reportedTotal ?? 0} Grailed post${reportedTotal === 1 ? "" : "s"} found for this search.`
+            : failures.length
+              ? `${first.message || "No readable listings returned."} ${failures.length} query request${failures.length === 1 ? "" : "s"} failed.`
+              : first.message || "No readable listings returned.";
 
         return {
           marketplace,
@@ -3363,6 +3373,7 @@ function BrowseView({
           sourceUrl: first.sourceUrl ?? MARKETPLACE_INFO[marketplace].search(query || category),
           listings: mergedListings,
           hasMore: values.some((entry) => Boolean(entry.hasMore)),
+          totalResults: reportedTotal,
         };
       }).then((attempts) => attempts.map((attempt, index) => {
         if (attempt.status === "fulfilled") return attempt.value;
@@ -3535,6 +3546,9 @@ function BrowseView({
             message: preservedMessage,
             listings,
             hasMore: Boolean(response.hasMore) && addedCount > 0,
+            totalResults: marketplace === "Grailed"
+              ? Math.max(existing?.totalResults ?? 0, response.totalResults ?? 0)
+              : Math.max(existing?.totalResults ?? 0, response.totalResults ?? 0) || undefined,
           };
         }
 
@@ -3640,7 +3654,9 @@ function BrowseView({
           </span>
           <span className={`live-badge ${state?.status}`}>
             {state?.status === "live"
-              ? `${state.listings.length} loaded`
+              ? marketplace === "Grailed" && state.totalResults !== undefined
+                ? `${state.totalResults} posts`
+                : `${state.listings.length} loaded`
               : state?.status}
           </span>
         </div>

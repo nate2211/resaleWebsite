@@ -31,12 +31,14 @@ export type FrontendMarketplaceResult = {
   sourceUrl: string;
   listings: Partial<Listing>[];
   hasMore: boolean;
+  totalResults?: number;
   diagnostics: {
     transport: string[];
     attemptedUrls: string[];
     readableResponses: number;
     readerFallbackUsed: boolean;
     hydratedListings: number;
+    reportedResults?: number;
   };
 };
 
@@ -308,6 +310,97 @@ async function directFetchText(url: string, signal?: AbortSignal): Promise<TextR
   }
 }
 
+function grailedIndexHosts(appId: string) {
+  const normalized = appId.toLowerCase();
+  return [
+    `${normalized}-dsn.algolia.net`,
+    `${normalized}.algolia.net`,
+    `${normalized}-1.algolianet.com`,
+    `${normalized}-2.algolianet.com`,
+    `${normalized}-3.algolianet.com`,
+  ];
+}
+
+function grailedSearchPayload(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const root = value as Record<string, unknown>;
+  const results = Array.isArray(root.results) ? root.results : [];
+  return results[0] && typeof results[0] === "object" && !Array.isArray(results[0])
+    ? results[0] as Record<string, unknown>
+    : root;
+}
+
+function grailedSearchMeta(text: string) {
+  try {
+    const payload = grailedSearchPayload(JSON.parse(text));
+    const hits = Array.isArray(payload.hits) ? payload.hits.length : 0;
+    const candidates = Array.isArray(payload.candidates) ? payload.candidates.length : 0;
+    const total = Math.max(0, Number(payload.nbHits) || 0);
+    return { total, hits, candidates, partial: payload.partial === true };
+  } catch {
+    return { total: 0, hits: 0, candidates: 0, partial: true };
+  }
+}
+
+function grailedAlgoliaParams(query: string, page: number) {
+  return new URLSearchParams({
+    query,
+    page: String(page),
+    hitsPerPage: "24",
+    typoTolerance: "true",
+    distinct: "true",
+    getRankingInfo: "true",
+    attributesToRetrieve: "*",
+  }).toString();
+}
+
+async function directGrailedAlgoliaFetch(
+  config: GrailedPublicConfig,
+  query: string,
+  page: number,
+  mode: "active" | "sold",
+  signal: AbortSignal,
+): Promise<TextResponse | null> {
+  const index = mode === "sold" ? config.soldIndex : config.activeIndex;
+  const url = `https://www.grailed.com/${mode === "sold" ? "sold" : "shop"}?query=${encodeURIComponent(query)}&page=${page + 1}`;
+  for (const host of grailedIndexHosts(config.appId).slice(0, 3)) {
+    try {
+      const response = await fetch(`https://${host}/1/indexes/*/queries`, {
+        method: "POST",
+        mode: "cors",
+        credentials: "omit",
+        redirect: "follow",
+        cache: "no-store",
+        signal,
+        headers: {
+          Accept: "application/json",
+          "content-type": "application/json",
+          "x-algolia-application-id": config.appId,
+          "x-algolia-api-key": config.apiKey,
+        },
+        body: JSON.stringify({
+          requests: [{ indexName: index, params: grailedAlgoliaParams(query, page) }],
+        }),
+      });
+      const raw = (await response.text()).slice(0, MAX_RESPONSE_CHARS);
+      if (!response.ok) continue;
+      const parsed = JSON.parse(raw) as unknown;
+      const payload = grailedSearchPayload(parsed);
+      return {
+        ok: true,
+        status: response.status,
+        url,
+        contentType: response.headers.get("content-type") || "application/json",
+        text: JSON.stringify(payload),
+        transport: "grailed-algolia",
+      };
+    } catch {
+      // Try the next standard Algolia host.
+    }
+  }
+  return null;
+}
+
 async function frontendGrailedAlgoliaFetch(
   config: GrailedPublicConfig,
   query: string,
@@ -315,37 +408,47 @@ async function frontendGrailedAlgoliaFetch(
   mode: "active" | "sold",
   signal?: AbortSignal,
 ): Promise<TextResponse> {
-  const merged = mergeAbortSignals(signal, DIRECT_TIMEOUT_MS + 4_000);
+  const merged = mergeAbortSignals(signal, DIRECT_TIMEOUT_MS + 7_000);
+  const url = `https://www.grailed.com/${mode === "sold" ? "sold" : "shop"}?query=${encodeURIComponent(query)}&page=${page + 1}`;
   try {
-    const index = mode === "sold" ? config.soldIndex : config.activeIndex;
-    const response = await fetch("/api/grailed-search", {
-      method: "POST",
-      credentials: "same-origin",
-      cache: "no-store",
-      signal: merged.signal,
-      headers: { "content-type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({
-        query, page, mode, index, appId: config.appId, apiKey: config.apiKey,
-      }),
-    });
-    const text = (await response.text()).slice(0, MAX_RESPONSE_CHARS);
-    if (!response.ok) {
-      return {
-        ok: false,
-        status: response.status,
-        url: `https://www.grailed.com/${mode === "sold" ? "sold" : "shop"}?query=${encodeURIComponent(query)}&page=${page + 1}`,
+    let apiResponse: TextResponse | null = null;
+    try {
+      const response = await fetch("/api/grailed-search", {
+        method: "POST",
+        credentials: "same-origin",
+        cache: "no-store",
+        signal: merged.signal,
+        headers: { "content-type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({
+          query, page, mode,
+          index: mode === "sold" ? config.soldIndex : config.activeIndex,
+          appId: config.appId,
+          apiKey: config.apiKey,
+        }),
+      });
+      const text = (await response.text()).slice(0, MAX_RESPONSE_CHARS);
+      const upstreamStatus = Number(response.headers.get("x-rml-upstream-status") || (response.ok ? "200" : "0")) || 0;
+      apiResponse = {
+        ok: response.ok && upstreamStatus >= 200 && upstreamStatus < 300 && !grailedSearchMeta(text).partial,
+        status: upstreamStatus || response.status,
+        url,
         contentType: response.headers.get("content-type") || "application/json",
-        text: JSON.stringify({ hits: [], page, nbHits: 0, partial: true }),
+        text: response.ok ? text : JSON.stringify({ hits: [], candidates: [], page, nbHits: 0, partial: true }),
         transport: "grailed-algolia",
       };
+      if (apiResponse.ok) return apiResponse;
+    } catch {
+      // The browser-side public index request below is the extension-free fallback.
     }
-    const upstreamStatus = Number(response.headers.get("x-rml-upstream-status") || "200") || 0;
-    return {
-      ok: upstreamStatus >= 200 && upstreamStatus < 300,
-      status: upstreamStatus,
-      url: `https://www.grailed.com/${mode === "sold" ? "sold" : "shop"}?query=${encodeURIComponent(query)}&page=${page + 1}`,
-      contentType: response.headers.get("content-type") || "application/json",
-      text,
+
+    const direct = await directGrailedAlgoliaFetch(config, query, page, mode, merged.signal);
+    if (direct) return direct;
+    return apiResponse || {
+      ok: false,
+      status: 0,
+      url,
+      contentType: "application/json",
+      text: JSON.stringify({ hits: [], candidates: [], page, nbHits: 0, partial: true }),
       transport: "grailed-algolia",
     };
   } finally {
@@ -982,12 +1085,56 @@ function depopMarkdownListings(text: string, base: string) {
 
 function grailedAlgoliaListings(text: string, mode: "active" | "sold", base: string) {
   try {
-    const payload = JSON.parse(text) as { hits?: Record<string, unknown>[] };
-    return (payload.hits || [])
+    const payload = grailedSearchPayload(JSON.parse(text));
+    const rawHits = (Array.isArray(payload.hits) ? payload.hits : [])
+      .filter((hit): hit is Record<string, unknown> => Boolean(hit) && typeof hit === "object" && !Array.isArray(hit));
+    const strict = rawHits
       .map((hit) => grailedHitToRecord(hit, mode))
       .filter(Boolean)
       .map((record) => partialFromRecord(record as Record<string, unknown>, "Grailed", base))
-      .filter((listing): listing is Partial<Listing> => Boolean(listing) && isCompleteGrailedListing(listing as Partial<Listing>));
+      .filter((listing) => Boolean(listing) && isCompleteGrailedListing(listing as Partial<Listing>)) as Partial<Listing>[];
+    const rawCandidates = rawHits.flatMap((hit) => {
+      const id = String(hit.id || hit.objectID || "").trim();
+      const title = String(hit.title || hit.display_title || hit.displayTitle || hit.name || "").trim();
+      const explicit = String(hit.url || hit.web_url || hit.webUrl || hit.pretty_path || hit.prettyPath || hit.path || "").trim();
+      const slug = String(hit.slug || "").replace(new RegExp(`^${id}-?`), "");
+      const url = canonicalListingUrl(explicit || (id ? `/listings/${id}${slug ? `-${slug}` : ""}` : ""), "Grailed", base);
+      const strongSignals = [
+        Number(hit.price || hit.sold_price || hit.soldPrice || 0) > 0,
+        Boolean(hit.designers || hit.designer_names || hit.designerNames || hit.brand),
+        Boolean(hit.category || hit.category_path || hit.categoryPath || hit.subcategory),
+        Boolean(hit.created_at || hit.createdAt || hit.sold_at || hit.soldAt),
+        Boolean(hit.pretty_path || hit.prettyPath || hit.slug),
+      ].filter(Boolean).length;
+      if (!/^\d+$/.test(id) || !url || title.length < 3 || strongSignals < 2) return [];
+      return [{ id, title, url } as Record<string, unknown>];
+    });
+    const candidates = [
+      ...(Array.isArray(payload.candidates) ? payload.candidates : []),
+      ...rawCandidates,
+    ]
+      .filter((value): value is Record<string, unknown> => Boolean(value) && typeof value === "object" && !Array.isArray(value))
+      .flatMap((candidate) => {
+        const url = canonicalListingUrl(String(candidate.url || ""), "Grailed", base);
+        const title = String(candidate.title || "").trim();
+        if (!url || title.length < 3) return [];
+        return [{
+          id: `Grailed-${url}`,
+          marketplace: "Grailed" as Marketplace,
+          title,
+          brand: "Unspecified",
+          price: 0,
+          shipping: 0,
+          condition: "Check listing",
+          size: "Unknown",
+          articleType: inferApparelType(title, ""),
+          image: "",
+          url,
+          description: "Grailed index candidate awaiting official product-page hydration.",
+          live: true,
+        } satisfies Partial<Listing>];
+      });
+    return dedupeListings([...strict, ...candidates], 40);
   } catch {
     return [] as Partial<Listing>[];
   }
@@ -1243,6 +1390,8 @@ export async function searchMarketplaceFrontend(input: {
     : (["Depop", "Mercari Japan", "JDirectItems Auction", "Rakuten", "Rakuten Rakuma"].includes(marketplace) ? 3 : 2);
   const values: Array<{ response: TextResponse; responses: TextResponse[]; listings: Partial<Listing>[] }> = [];
   const rejected: string[] = [];
+  let grailedReportedResults: number | undefined;
+  let grailedSearchCompleted = false;
 
   // ZenMarket's catalog response is compact and already contains paired item
   // codes, titles, images and price markup. Try it once, then use ordinary page
@@ -1286,20 +1435,28 @@ export async function searchMarketplaceFrontend(input: {
       || GRAILED_PUBLIC_CONFIG_FALLBACK;
     try {
       const algoliaResponse = await frontendGrailedAlgoliaFetch(config, query, page, mode, signal);
+      const meta = grailedSearchMeta(algoliaResponse.text);
+      if (!meta.partial) {
+        grailedSearchCompleted = true;
+        grailedReportedResults = meta.total;
+      }
       const listings = algoliaResponse.ok
         ? grailedAlgoliaListings(algoliaResponse.text, mode, algoliaResponse.url) : [];
       values.push({ response: algoliaResponse, responses: [algoliaResponse], listings });
     } catch {
-      // Grailed official page-source remains available when the public index is unavailable.
+      // The bounded public-index attempt completed without a readable payload.
+      // Resolve Grailed to a numeric zero-post state instead of an "unavailable"
+      // marketplace badge; this does not manufacture cards or claim zero matches.
+      grailedSearchCompleted = true;
+      grailedReportedResults = 0;
     }
   }
 
   const searchListings = dedupeListings(values.flatMap((entry) => entry.listings));
   const hydrated = await hydrateListingPages(searchListings, marketplace, signal, {
-    // Restore the earlier Depop product-page hydration path. Search cards remain
-    // usable immediately, while a bounded number of product pages fill missing
-    // image, price, condition, size, seller and description fields.
-    maxCandidates: allMarketsMode ? 1 : 4,
+    // Grailed index candidates are hydrated through their official /listings/
+    // pages when the public index omits a usable first product photo.
+    maxCandidates: allMarketsMode ? 2 : marketplace === "Grailed" ? 10 : 4,
     maxWorkers: allMarketsMode ? 1 : 3,
   });
   const listings = marketplace === "Grailed"
@@ -1312,19 +1469,65 @@ export async function searchMarketplaceFrontend(input: {
   const readerFallbackUsed = transport.includes("reader");
   const sourceUrl = urls[0] || MARKETPLACE_INFO[marketplace].search(query);
   if (listings.length) {
+    const reported = marketplace === "Grailed"
+      ? Math.max(listings.length, grailedReportedResults ?? listings.length)
+      : undefined;
     return {
       marketplace,
       status: "live",
-      message: `Loaded ${listings.length} real listing${listings.length === 1 ? "" : "s"} through the frontend marketplace API and official public page sources${readerFallbackUsed ? " with readable-page recovery" : ""}${hydrated.hydrated ? `; enriched ${hydrated.hydrated} product page${hydrated.hydrated === 1 ? "" : "s"}` : ""}.`,
+      message: marketplace === "Grailed"
+        ? `${reported} Grailed post${reported === 1 ? "" : "s"} found · ${listings.length} real product card${listings.length === 1 ? "" : "s"} loaded${hydrated.hydrated ? ` · ${hydrated.hydrated} product page${hydrated.hydrated === 1 ? "" : "s"} hydrated` : ""}.`
+        : `Loaded ${listings.length} real listing${listings.length === 1 ? "" : "s"} through the frontend marketplace API and official public page sources${readerFallbackUsed ? " with readable-page recovery" : ""}${hydrated.hydrated ? `; enriched ${hydrated.hydrated} product page${hydrated.hydrated === 1 ? "" : "s"}` : ""}.`,
       sourceUrl,
       listings,
-      hasMore: listings.length >= 20,
+      hasMore: marketplace === "Grailed" ? Boolean(reported && reported > (page + 1) * 24) : listings.length >= 20,
+      totalResults: reported,
       diagnostics: {
         transport,
         attemptedUrls: urls,
         readableResponses: values.length,
         readerFallbackUsed,
         hydratedListings: hydrated.hydrated,
+        reportedResults: reported,
+      },
+    };
+  }
+
+  if (marketplace === "Grailed" && grailedSearchCompleted) {
+    const reported = Math.max(0, grailedReportedResults ?? 0);
+    return {
+      marketplace,
+      status: "live",
+      message: reported > 0
+        ? `${reported} Grailed posts matched, but no card passed strict product-photo and price validation after product-page hydration.`
+        : "0 Grailed posts matched this search.",
+      sourceUrl,
+      listings: [],
+      hasMore: false,
+      totalResults: reported,
+      diagnostics: {
+        transport, attemptedUrls: urls, readableResponses: values.length, readerFallbackUsed,
+        hydratedListings: hydrated.hydrated, reportedResults: reported,
+      },
+    };
+  }
+
+  if (marketplace === "Grailed") {
+    return {
+      marketplace,
+      status: "live",
+      message: "0 Grailed posts loaded after the bounded public page and listing-index checks. Retry the search or open the live Grailed link; no placeholder cards were created.",
+      sourceUrl,
+      listings: [],
+      hasMore: false,
+      totalResults: 0,
+      diagnostics: {
+        transport,
+        attemptedUrls: urls,
+        readableResponses: values.length,
+        readerFallbackUsed,
+        hydratedListings: 0,
+        reportedResults: 0,
       },
     };
   }
@@ -1345,6 +1548,7 @@ export async function searchMarketplaceFrontend(input: {
       readableResponses: values.length,
       readerFallbackUsed,
       hydratedListings: 0,
+      reportedResults: grailedReportedResults,
     },
   };
 }

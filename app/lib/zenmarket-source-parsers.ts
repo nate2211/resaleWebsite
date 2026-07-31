@@ -1,5 +1,11 @@
 export type ZenMarketName = "Mercari Japan" | "JDirectItems Auction" | "Rakuten" | "Rakuten Rakuma";
 
+/** Reject Cloudflare challenge pages and ZenMarket ASP.NET error envelopes before parsing. */
+export function isZenMarketChallengeSource(source: string) {
+  const sample = source.slice(0, 260_000);
+  return /<title>\s*Just a moment\.\.\.|cf-chl-|challenge-platform|Enable JavaScript and cookies to continue|checking your browser|verify you are human|access denied|There was an error processing the request|\"ExceptionType\"\s*:\s*\"\"/i.test(sample);
+}
+
 const ZENMARKET_PRODUCT_PATH: Record<ZenMarketName, string> = {
   "Mercari Japan": "mercariproduct.aspx",
   "JDirectItems Auction": "auction.aspx",
@@ -101,6 +107,7 @@ function productPathMatches(marketplace: ZenMarketName, pathname: string) {
 
 /** Parse ZenMarket's normal search-page source and embedded product links. */
 export function parseZenMarketPageSource(source: string, marketplace: ZenMarketName, sourceUrl: string) {
+  if (!source.trim() || isZenMarketChallengeSource(source)) return [];
   const normalized = source
     .replaceAll("\\u002F", "/")
     .replaceAll("\\u0026", "&")
@@ -144,6 +151,9 @@ export function parseZenMarketPageSource(source: string, marketplace: ZenMarketN
       || ""
     ).replaceAll("\\/", "/");
     const parsedPrice = priceFromControl(context);
+    if (!title || /^(?:Mercari Japan|JDirectItems Auction|Rakuten|Rakuten Rakuma) listing\b/i.test(title)) continue;
+    if (!imageUrl || /(?:placeholder|no[-_]?image|logo|banner|sprite|favicon)/i.test(imageUrl)) continue;
+    if (!(parsedPrice.amount > 0)) continue;
     const cs = Number(parsed.searchParams.get("cs") || "") || undefined;
     const page = Number(parsed.searchParams.get("p") || sourcePage) || sourcePage;
     const pos = Number(parsed.searchParams.get("pos") || position) || position;
@@ -178,6 +188,9 @@ export function parseZenMarketPageSource(source: string, marketplace: ZenMarketN
       || ""
     ).replaceAll("\\/", "/");
     const parsedPrice = priceFromControl(context);
+    if (!title || /^(?:Mercari Japan|JDirectItems Auction|Rakuten|Rakuten Rakuma) listing\b/i.test(title)) continue;
+    if (!imageUrl || /(?:placeholder|no[-_]?image|logo|banner|sprite|favicon)/i.test(imageUrl)) continue;
+    if (!(parsedPrice.amount > 0)) continue;
     output.set(itemCode, {
       itemCode,
       title,
@@ -219,6 +232,8 @@ export function zenMarketCatalogRecords(value: unknown, marketplace: ZenMarketNa
     const price = Number.isFinite(numericPrice) && numericPrice > 0 ? numericPrice : parsedPrice.amount;
     const currency = textOf(record, ["Currency", "currency", "CurrencyCode"]) || parsedPrice.currency || "JPY";
     const imageUrl = textOf(record, ["PreviewImageUrl", "ImageUrl", "imageUrl", "ThumbnailUrl", "ItemImage"]);
+    if (!price || !imageUrl || /(?:placeholder|no[-_]?image|logo|banner|sprite|favicon)/i.test(imageUrl)) continue;
+    if (/there was an error processing|exceptiontype|stacktrace/i.test(title)) continue;
     const explicitUrl = textOf(record, ["Url", "url", "ItemUrl", "ProductUrl", "DetailUrl", "href"]);
     let context: { query?: string; page?: number; position?: number; cs?: number } = {};
     if (explicitUrl) {
@@ -247,3 +262,94 @@ export function zenMarketCatalogRecords(value: unknown, marketplace: ZenMarketNa
   }
   return [...output.values()];
 }
+
+function officialStoreImage(context: string) {
+  const values = [
+    ...context.matchAll(/(?:src|data-src|data-original|content)=["'](https?:\/\/[^"'<>\s]+)["']/gi),
+    ...context.matchAll(/"(?:image|imageUrl|thumbnail|thumbnailUrl|photo|photoUrl)"\s*:\s*"(https?:\\?\/\\?\/[^"\s]+)"/gi),
+  ].map((match) => String(match[1] || "").replaceAll("\\/", "/").replaceAll("&amp;", "&"));
+  return values.find((value) => !/(?:placeholder|no[-_]?image|logo|banner|sprite|favicon|avatar|icon)/i.test(value)) || "";
+}
+
+function officialStoreTitle(context: string) {
+  const candidates = [
+    context.match(/<(?:h1|h2|h3|h4)[^>]*>([\s\S]{3,500}?)<\/(?:h1|h2|h3|h4)>/i)?.[1],
+    context.match(/(?:aria-label|title|alt)=["']([^"']{3,500})["']/i)?.[1],
+    context.match(/"(?:name|title|itemName|item_name|productName|product_name)"\s*:\s*"([^"\n]{3,500})"/i)?.[1],
+  ].map((value) => cleanMarkup(String(value || ""))).filter(Boolean);
+  return candidates.find((value) => !/^(?:search|shop|mercari|rakuten|rakuma|yahoo|auction|image|product)$/i.test(value)) || "";
+}
+
+function directItemCandidates(source: string, marketplace: ZenMarketName) {
+  const normalized = source.replaceAll("\\u002F", "/").replaceAll("\\/", "/").replaceAll("&amp;", "&");
+  const patterns: Array<{ pattern: RegExp; code: (match: RegExpMatchArray) => string }> = marketplace === "Mercari Japan"
+    ? [{ pattern: /https?:\/\/(?:jp\.)?mercari\.com\/(?:[a-z]{2}\/)?item\/(m[0-9a-z]+)/gi, code: (match) => match[1] }]
+    : marketplace === "JDirectItems Auction"
+      ? [{ pattern: /https?:\/\/(?:page\.)?auctions\.yahoo\.co\.jp\/jp\/auction\/([a-z0-9]+)/gi, code: (match) => match[1] }]
+      : marketplace === "Rakuten"
+        ? [{ pattern: /https?:\/\/item\.rakuten\.co\.jp\/([^/?#\s]+)\/([^/?#\s]+)/gi, code: (match) => `${match[1]}:${match[2]}` }]
+        : [
+            { pattern: /https?:\/\/item\.fril\.jp\/([a-z0-9]+)/gi, code: (match) => match[1] },
+            { pattern: /https?:\/\/(?:www\.)?fril\.jp\/shop\/[^/?#\s]+\/item\/([a-z0-9]+)/gi, code: (match) => match[1] },
+          ];
+  const output: Array<{ rawUrl: string; itemCode: string; index: number }> = [];
+  for (const entry of patterns) {
+    for (const match of normalized.matchAll(entry.pattern)) {
+      const itemCode = entry.code(match).trim();
+      if (!itemCode) continue;
+      output.push({ rawUrl: match[0], itemCode, index: match.index || 0 });
+      if (output.length >= 120) return { normalized, output };
+    }
+  }
+  return { normalized, output };
+}
+
+/**
+ * Parse official Mercari JP, Yahoo Auctions, Rakuten, or Rakuma search source,
+ * then rebuild the corresponding normal ZenMarket product URL.
+ */
+export function parseOfficialStorePageSource(
+  source: string,
+  marketplace: ZenMarketName,
+  sourceUrl: string,
+) {
+  if (!source.trim() || isZenMarketChallengeSource(source)) return [];
+  const { normalized, output: candidates } = directItemCandidates(source, marketplace);
+  const records = new Map<string, Record<string, unknown>>();
+  let position = 0;
+  let query = "";
+  let page = 1;
+  try {
+    const parsed = new URL(sourceUrl);
+    query = parsed.searchParams.get("q") || parsed.searchParams.get("keyword") || parsed.searchParams.get("query") || "";
+    page = Math.max(1, Number(parsed.searchParams.get("p") || parsed.searchParams.get("page") || "1") || 1);
+  } catch { /* fixture source URL */ }
+
+  for (const candidate of candidates) {
+    if (records.has(candidate.itemCode)) continue;
+    position += 1;
+    const context = normalized.slice(Math.max(0, candidate.index - 2200), Math.min(normalized.length, candidate.index + 3800));
+    const title = officialStoreTitle(context);
+    const imageUrl = officialStoreImage(context);
+    const parsedPrice = priceFromControl(context);
+    if (!title || !imageUrl || !(parsedPrice.amount > 0)) continue;
+    records.set(candidate.itemCode, {
+      itemCode: candidate.itemCode,
+      title,
+      url: zenMarketCanonicalUrl(marketplace, candidate.itemCode, { query, page, position }),
+      sourceUrl: candidate.rawUrl,
+      imageUrl,
+      price: parsedPrice.amount,
+      currency: parsedPrice.currency || "JPY",
+      description: cleanMarkup(context).slice(0, 900),
+      storeName: marketplace,
+    });
+  }
+  return [...records.values()];
+}
+
+/** True only when a ZenMarket payload contains at least one complete product. */
+export function zenMarketPayloadHasItems(value: unknown, marketplace: ZenMarketName) {
+  return zenMarketCatalogRecords(value, marketplace).length > 0;
+}
+

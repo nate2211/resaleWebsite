@@ -47,7 +47,7 @@ for (const route of ["/thrift-check", "/listing-template", "/manifest.webmanifes
 const healthResult = await read("/api/health");
 if (!healthResult.response.ok) throw new Error(`/api/health returned HTTP ${healthResult.response.status}.`);
 const health = JSON.parse(healthResult.text);
-if (health.revision !== "market-search-grailed-real-listings-v22") {
+if (health.revision !== "market-search-zenmarket-grailed-posts-v24") {
   throw new Error(`The domain is serving an older revision: ${health.revision || "unknown"}.`);
 }
 if (health.marketplaceRequests !== "frontend-api-depop-parallel-recovery"
